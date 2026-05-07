@@ -161,8 +161,8 @@ async def delete_category(cat_id: str):
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
     if not cat:
         raise HTTPException(status_code=404, detail="Not found")
-    # also remove menu items in this category
-    await db.menu_items.delete_many({"category": cat["name"]})
+    # Move items in this category to Uncategorized (preserve menu items)
+    await db.menu_items.update_many({"category": cat["name"]}, {"$set": {"category": ""}})
     await db.categories.delete_one({"id": cat_id})
     return {"success": True}
 

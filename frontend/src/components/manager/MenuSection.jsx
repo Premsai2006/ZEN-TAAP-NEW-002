@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
-import { X, Plus, ImageIcon, Pencil, Trash2 } from "lucide-react";
+import { X, Plus, ImageIcon, Pencil, Trash2, Search } from "lucide-react";
 import { api } from "@/lib/api";
 
 const MAX_IMAGES = 4;
-const initialForm = { name: "", price: "", images: [] };
+const initialForm = { name: "", price: "", category: "", images: [] };
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -14,10 +14,12 @@ const fileToDataUrl = (file) =>
     r.readAsDataURL(file);
   });
 
-export default function MenuSection({ menu, onRefresh }) {
+export default function MenuSection({ menu, categories, onRefresh }) {
   const [form, setForm] = useState(initialForm);
   const [editingId, setEditingId] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [newCat, setNewCat] = useState("");
+  const [search, setSearch] = useState("");
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -66,6 +68,7 @@ export default function MenuSection({ menu, onRefresh }) {
     const payload = {
       name: form.name.trim(),
       price: parseFloat(form.price),
+      category: form.category || "",
       images: form.images,
       image_url: form.images[0] || "",
     };
@@ -90,6 +93,7 @@ export default function MenuSection({ menu, onRefresh }) {
     setForm({
       name: it.name,
       price: it.price,
+      category: it.category || "",
       images: it.images && it.images.length ? it.images : it.image_url ? [it.image_url] : [],
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -113,10 +117,90 @@ export default function MenuSection({ menu, onRefresh }) {
     onRefresh();
   };
 
-  const hasContent = form.name || form.price || form.images.length;
+  const addCategory = async (e) => {
+    e.preventDefault();
+    if (!newCat.trim()) return;
+    try {
+      await api.post("/categories", { name: newCat.trim() });
+      setNewCat("");
+      toast.success("Category added");
+      onRefresh();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed");
+    }
+  };
+
+  const removeCategory = async (c) => {
+    if (!window.confirm(`Delete "${c.name}"? Items in this category will be moved to Uncategorized.`)) return;
+    try {
+      await api.delete(`/categories/${c.id}`);
+      toast.success("Category removed");
+      onRefresh();
+    } catch (err) {
+      toast.error("Failed to remove");
+    }
+  };
+
+  const filteredMenu = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return menu;
+    return menu.filter(
+      (it) =>
+        it.name.toLowerCase().includes(q) ||
+        (it.category || "").toLowerCase().includes(q)
+    );
+  }, [menu, search]);
+
+  const hasContent = form.name || form.price || form.images.length || form.category;
 
   return (
     <div className="section active" data-testid="menu-section">
+      {/* Categories management */}
+      <div className="add-item-card" data-testid="categories-card">
+        <div className="font-serif" style={{ fontSize: 16, marginBottom: 12 }}>
+          Categories
+        </div>
+        <div className="cat-chips">
+          {(categories || []).map((c) => (
+            <span key={c.id} className="cat-chip" data-testid={`cat-chip-${c.slug}`}>
+              {c.name}
+              <button
+                onClick={() => removeCategory(c)}
+                data-testid={`cat-remove-${c.slug}`}
+                title="Remove category"
+              >
+                <X size={14} />
+              </button>
+            </span>
+          ))}
+          {(!categories || categories.length === 0) && (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>No categories yet.</div>
+          )}
+        </div>
+        <form onSubmit={addCategory} style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            placeholder="New category name"
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value)}
+            data-testid="new-category-input"
+            style={{
+              flex: 1,
+              background: "var(--bg)",
+              border: "1px solid var(--line)",
+              color: "var(--text)",
+              padding: "10px 12px",
+              borderRadius: 8,
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+          <button type="submit" className="submit-btn" data-testid="add-category-btn">
+            <Plus size={14} style={{ marginRight: 4, display: "inline" }} /> Add
+          </button>
+        </form>
+      </div>
+
       {/* Add/Edit item */}
       <div className="add-item-card">
         <div
@@ -152,6 +236,22 @@ export default function MenuSection({ menu, onRefresh }) {
                 data-testid="item-price-input"
               />
             </div>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label">Category (optional)</label>
+            <select
+              value={form.category}
+              onChange={(e) => set("category", e.target.value)}
+              data-testid="item-category-select"
+            >
+              <option value="">— Uncategorized —</option>
+              {(categories || []).map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group" style={{ marginBottom: 12 }}>
@@ -227,9 +327,54 @@ export default function MenuSection({ menu, onRefresh }) {
         </form>
       </div>
 
+      {/* Search bar */}
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+          padding: "10px 14px",
+          marginBottom: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+        data-testid="menu-search-bar"
+      >
+        <Search size={16} color="var(--muted)" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search menu by name or category…"
+          data-testid="menu-search-input"
+          style={{
+            flex: 1,
+            background: "transparent",
+            border: "none",
+            color: "var(--text)",
+            fontSize: 14,
+            outline: "none",
+          }}
+        />
+        {search && (
+          <button
+            className="mini-btn"
+            onClick={() => setSearch("")}
+            data-testid="menu-search-clear"
+            style={{ padding: "4px 10px" }}
+          >
+            Clear
+          </button>
+        )}
+        <span style={{ color: "var(--muted)", fontSize: 12 }} data-testid="menu-search-count">
+          {filteredMenu.length}/{menu.length}
+        </span>
+      </div>
+
       {/* Menu list */}
       <div className="menu-mgmt-grid" data-testid="menu-grid">
-        {menu.map((it) => {
+        {filteredMenu.map((it) => {
           const imgs = it.images && it.images.length ? it.images : it.image_url ? [it.image_url] : [];
           const primary = imgs[0];
           return (
@@ -252,6 +397,7 @@ export default function MenuSection({ menu, onRefresh }) {
                       </span>
                     )}
                   </div>
+                  {it.category && <div className="menu-item-cat">{it.category}</div>}
                   <div className="menu-actions">
                     <button
                       className="mini-btn"
@@ -281,9 +427,9 @@ export default function MenuSection({ menu, onRefresh }) {
             </div>
           );
         })}
-        {menu.length === 0 && (
-          <div style={{ color: "var(--muted)", textAlign: "center", padding: 30 }}>
-            No menu items yet.
+        {filteredMenu.length === 0 && (
+          <div style={{ color: "var(--muted)", textAlign: "center", padding: 30 }} data-testid="menu-empty">
+            {search ? `No items match "${search}".` : "No menu items yet."}
           </div>
         )}
       </div>
