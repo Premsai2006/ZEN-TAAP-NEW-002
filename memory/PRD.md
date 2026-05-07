@@ -35,9 +35,23 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - 1-second auto-refresh on every section via `useInterval`.
 - Seed: 6 categories, 10 menu items, 6 demo orders, settings PIN `123456`.
 
-## Verified Tests (iteration_1.json)
-- Backend pytest 13/13 (100%): auth, menu/category/order CRUD, stats/today, image-upload validation.
-- Frontend Playwright e2e (100%): full login → manage → toggle availability → customer reflects → logout dialog flow.
+## Iteration 2 (2026-02-07) — 8 Manager Dashboard changes
+1. **Removed category dropdown + emoji input** from Add Item form (form now: Name + Price + Photos only).
+2. **Cancel button** added to the form (top-right and bottom) — clears in-progress add or exits edit mode.
+3. **Sidebar labels** always visible alongside icons (Live Orders, Tables, Menu Management, Sales Today, Settings) — removed the mobile collapse-to-icons CSS.
+4. **Clock** in topbar trimmed to `HH:MM am/pm` (no seconds).
+5. **Generate Bill** button on every order → opens `BillModal` with restaurant branding, itemized lines, CGST+SGST split of GST rate, total. Uses `window.print()` so it works on any printer (browser default → thermal). `@media print` CSS hides everything except `.bill-print`, sized to 80mm.
+6. **Multi-image upload (max 4 photos)** per menu item, stored as `images: [data-url, …]` on the backend (`MenuItem.images`); UI shows thumbnails with × remove.
+7. **Login counter `0/10 digits` removed.**
+8. **Settings page** (new sidebar entry):
+   - Bill branding: restaurant name, phone, address, logo upload (printed at top of every bill).
+   - Tax/GST: GST number (printed on bills) + GST rate select (0%, 5%, 12%, 18%).
+   - Printer setup: paper-width select (browser / thermal-58mm / thermal-80mm) + step-by-step thermal-printer connection instructions.
+   - Persists via `GET/PUT /api/settings`; bill modal auto-reflects updates within 1s polling.
+
+## Verified Tests (iteration_2.json)
+- Backend pytest 19/19 (100%): existing 13 + new tests for `/api/settings` GET/PUT, `MenuItem.images` backfill, optional category/emoji, multi-image PUT.
+- Frontend Playwright 18/18 (100%): all 8 changes verified end-to-end.
 
 ## Backlog
 ### P1
