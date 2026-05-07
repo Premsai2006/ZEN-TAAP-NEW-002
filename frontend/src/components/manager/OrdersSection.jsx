@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { Receipt } from "lucide-react";
 import { api } from "@/lib/api";
+import BillModal from "@/components/manager/BillModal";
 
 const STATUSES = ["all", "new", "cooking", "done", "delivered"];
 
@@ -22,8 +24,9 @@ const timeAgo = (iso) => {
   return `${Math.floor(diff / 3600)} hr ago`;
 };
 
-export default function OrdersSection({ orders, stats, onRefresh }) {
+export default function OrdersSection({ orders, stats, settings, onRefresh }) {
   const [filter, setFilter] = useState("all");
+  const [billOrder, setBillOrder] = useState(null);
 
   const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
@@ -107,17 +110,26 @@ export default function OrdersSection({ orders, stats, onRefresh }) {
                   <td style={{ color: "var(--muted)" }}>{timeAgo(o.created_at)}</td>
                   <td>{statusBadge(o.status)}</td>
                   <td>
-                    {nxt ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {nxt && (
+                        <button
+                          className="mini-btn"
+                          onClick={() => updateOrder(o.id, nxt)}
+                          data-testid={`order-update-${o.order_number}`}
+                        >
+                          → {nxt}
+                        </button>
+                      )}
                       <button
-                        className="mini-btn"
-                        onClick={() => updateOrder(o.id, nxt)}
-                        data-testid={`order-update-${o.order_number}`}
+                        className="mini-btn primary"
+                        onClick={() => setBillOrder(o)}
+                        data-testid={`generate-bill-${o.order_number}`}
+                        title="Generate Bill"
                       >
-                        → {nxt}
+                        <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
+                        Bill
                       </button>
-                    ) : (
-                      "—"
-                    )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -125,6 +137,10 @@ export default function OrdersSection({ orders, stats, onRefresh }) {
           </tbody>
         </table>
       </div>
+
+      {billOrder && (
+        <BillModal order={billOrder} settings={settings} onClose={() => setBillOrder(null)} />
+      )}
     </div>
   );
 }

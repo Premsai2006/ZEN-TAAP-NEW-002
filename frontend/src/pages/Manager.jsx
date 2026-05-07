@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, ChefHat } from "lucide-react";
+import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, ChefHat, Settings as SettingsIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
 import TablesSection from "@/components/manager/TablesSection";
 import MenuSection from "@/components/manager/MenuSection";
 import SalesSection from "@/components/manager/SalesSection";
+import SettingsSection from "@/components/manager/SettingsSection";
 import LogoutDialog from "@/components/manager/LogoutDialog";
 
 const NAV = [
@@ -14,6 +15,7 @@ const NAV = [
   { key: "tables", label: "Tables", icon: Grid3x3 },
   { key: "menu", label: "Menu Management", icon: UtensilsCrossed },
   { key: "sales", label: "Sales Today", icon: BarChart3 },
+  { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function Manager() {
@@ -23,21 +25,24 @@ export default function Manager() {
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
   const [stats, setStats] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
   const refresh = async () => {
     try {
-      const [o, m, c, s] = await Promise.all([
+      const [o, m, c, s, st] = await Promise.all([
         api.get("/orders"),
         api.get("/menu"),
         api.get("/categories"),
         api.get("/stats/today"),
+        api.get("/settings"),
       ]);
       setOrders(o.data);
       setMenu(m.data);
       setCategories(c.data);
       setStats(s.data);
+      setSettings(st.data);
     } catch (err) {
       // silent retry — auto refresh
     }
@@ -56,10 +61,9 @@ export default function Manager() {
       const d = new Date();
       let h = d.getHours();
       const m = d.getMinutes().toString().padStart(2, "0");
-      const s = d.getSeconds().toString().padStart(2, "0");
       const ampm = h >= 12 ? "pm" : "am";
       h = h % 12 || 12;
-      setClock(`${h.toString().padStart(2, "0")}:${m}:${s} ${ampm}`);
+      setClock(`${h.toString().padStart(2, "0")}:${m} ${ampm}`);
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -121,7 +125,7 @@ export default function Manager() {
           </div>
         </div>
 
-        {active === "orders" && <OrdersSection orders={orders} stats={stats} onRefresh={refresh} />}
+        {active === "orders" && <OrdersSection orders={orders} stats={stats} settings={settings} onRefresh={refresh} />}
         {active === "tables" && <TablesSection orders={orders} />}
         {active === "menu" && (
           <MenuSection
@@ -133,6 +137,7 @@ export default function Manager() {
         {active === "sales" && (
           <SalesSection stats={stats} onLogoutClick={() => setShowLogout(true)} />
         )}
+        {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} />}
       </div>
 
       <LogoutDialog

@@ -71,9 +71,6 @@ export default function Login() {
               padding: "16px 12px",
             }}
           />
-          <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 6 }}>
-            {pin.length}/10 digits
-          </div>
         </div>
 
         <button

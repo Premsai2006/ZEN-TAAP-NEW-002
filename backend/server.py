@@ -40,9 +40,10 @@ class MenuItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     price: float
-    category: str
+    category: Optional[str] = ""
     emoji: Optional[str] = "🍽️"
     image_url: Optional[str] = ""
+    images: List[str] = Field(default_factory=list)
     available: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -50,9 +51,10 @@ class MenuItem(BaseModel):
 class MenuItemCreate(BaseModel):
     name: str
     price: float
-    category: str
+    category: Optional[str] = ""
     emoji: Optional[str] = "🍽️"
     image_url: Optional[str] = ""
+    images: Optional[List[str]] = None
     available: bool = True
 
 
@@ -62,7 +64,28 @@ class MenuItemUpdate(BaseModel):
     category: Optional[str] = None
     emoji: Optional[str] = None
     image_url: Optional[str] = None
+    images: Optional[List[str]] = None
     available: Optional[bool] = None
+
+
+class RestaurantSettings(BaseModel):
+    restaurant_name: str = "TableTap Restaurant"
+    logo_url: str = ""
+    gst_number: str = ""
+    gst_rate: float = 5.0  # percent
+    address: str = ""
+    phone: str = ""
+    printer_type: str = "browser"  # browser | thermal-58mm | thermal-80mm
+
+
+class SettingsUpdate(BaseModel):
+    restaurant_name: Optional[str] = None
+    logo_url: Optional[str] = None
+    gst_number: Optional[str] = None
+    gst_rate: Optional[float] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    printer_type: Optional[str] = None
 
 
 class OrderItem(BaseModel):
@@ -148,12 +171,43 @@ async def delete_category(cat_id: str):
 @api_router.get("/menu", response_model=List[MenuItem])
 async def list_menu():
     items = await db.menu_items.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    for it in items:
+        if "images" not in it or it.get("images") is None:
+            it["images"] = [it["image_url"]] if it.get("image_url") else []
     return items
+
+
+# ---------- Settings ----------
+@api_router.get("/settings", response_model=RestaurantSettings)
+async def get_settings():
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
+    if not doc:
+        s = RestaurantSettings()
+        await db.settings.insert_one({"key": "restaurant", **s.model_dump()})
+        return s
+    doc.pop("key", None)
+    return RestaurantSettings(**doc)
+
+
+@api_router.put("/settings", response_model=RestaurantSettings)
+async def update_settings(body: SettingsUpdate):
+    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
+    doc.pop("key", None)
+    return RestaurantSettings(**doc)
 
 
 @api_router.post("/menu", response_model=MenuItem)
 async def create_menu(body: MenuItemCreate):
-    item = MenuItem(**body.model_dump())
+    payload = body.model_dump()
+    if payload.get("images") is None:
+        payload["images"] = [payload["image_url"]] if payload.get("image_url") else []
+    elif payload["images"] and not payload.get("image_url"):
+        payload["image_url"] = payload["images"][0]
+    item = MenuItem(**payload)
     await db.menu_items.insert_one(item.model_dump())
     return item
 
@@ -163,10 +217,14 @@ async def update_menu(item_id: str, body: MenuItemUpdate):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
+    if "images" in update and "image_url" not in update:
+        update["image_url"] = update["images"][0] if update["images"] else ""
     res = await db.menu_items.update_one({"id": item_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     item = await db.menu_items.find_one({"id": item_id}, {"_id": 0})
+    if "images" not in item or item.get("images") is None:
+        item["images"] = [item["image_url"]] if item.get("image_url") else []
     return item
 
 
@@ -306,6 +364,10 @@ async def seed():
     # settings
     if not await db.settings.find_one({"key": "manager_pin"}):
         await db.settings.insert_one({"key": "manager_pin", "value": DEFAULT_PIN})
+
+    if not await db.settings.find_one({"key": "restaurant"}):
+        s = RestaurantSettings()
+        await db.settings.insert_one({"key": "restaurant", **s.model_dump()})
 
 
 @api_router.get("/")
