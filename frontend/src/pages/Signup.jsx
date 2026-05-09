@@ -11,6 +11,7 @@ export default function Signup() {
     pin: "",
     confirm_pin: "",
   });
+  const [accountExists, setAccountExists] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -18,10 +19,10 @@ export default function Signup() {
     api
       .get("/auth/status")
       .then((r) => {
-        if (r.data.setup_complete) navigate("/login", { replace: true });
+        setAccountExists(!!r.data.setup_complete);
       })
       .catch(() => {});
-  }, [navigate]);
+  }, []);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -65,6 +66,25 @@ export default function Signup() {
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 24, textAlign: "center" }}>
           First-time setup — register your restaurant and choose your PIN.
         </div>
+
+        {accountExists && (
+          <div
+            data-testid="signup-existing-notice"
+            style={{
+              background: "rgba(232,125,47,0.10)",
+              border: "1px solid rgba(232,125,47,0.4)",
+              color: "var(--gold)",
+              padding: "10px 14px",
+              borderRadius: 10,
+              fontSize: 13,
+              marginBottom: 18,
+              textAlign: "center",
+            }}
+          >
+            An account is already registered on this device.{" "}
+            <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>Login here</a>.
+          </div>
+        )}
 
         <div className="form-group" style={{ marginBottom: 12 }}>
           <label className="form-label">Manager Name</label>
