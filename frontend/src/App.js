@@ -1,9 +1,12 @@
 import "@/App.css";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import Login from "@/pages/Login";
+import Signup from "@/pages/Signup";
 import Manager from "@/pages/Manager";
 import Customer from "@/pages/Customer";
+import { initTheme } from "@/lib/theme";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("mgr_token");
@@ -12,12 +15,17 @@ function RequireAuth({ children }) {
 }
 
 function App() {
+  useEffect(() => {
+    initTheme();
+  }, []);
+
   return (
     <div className="App">
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
           <Route
             path="/manager"
             element={
@@ -29,7 +37,7 @@ function App() {
           <Route path="/customer" element={<Customer />} />
         </Routes>
       </BrowserRouter>
-      <Toaster theme="dark" position="top-right" />
+      <Toaster theme={localStorage.getItem("tt_theme") === "light" ? "light" : "dark"} position="top-right" />
     </div>
   );
 }

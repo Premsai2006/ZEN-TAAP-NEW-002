@@ -1,13 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { ChefHat, Lock } from "lucide-react";
+import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
 
 export default function Login() {
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    api
+      .get("/auth/status")
+      .then((r) => {
+        if (!r.data.setup_complete) navigate("/signup", { replace: true });
+      })
+      .catch(() => {});
+  }, [navigate]);
 
   const onPinChange = (e) => {
     const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 10);
@@ -24,7 +34,7 @@ export default function Login() {
     try {
       const { data } = await api.post("/auth/login", { pin });
       localStorage.setItem("mgr_token", data.token);
-      toast.success("Welcome back, Manager");
+      toast.success("Welcome back");
       navigate("/manager");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Login failed");
@@ -36,31 +46,27 @@ export default function Login() {
   return (
     <div className="login-shell" data-testid="login-page">
       <form className="login-card" onSubmit={submit} data-testid="login-form">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <ChefHat size={28} color="var(--gold)" />
-          <div className="font-serif" style={{ fontSize: 26, color: "var(--gold)" }}>
-            TableTap
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div className="brand-logo-wrap">
+            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 44 }} />
           </div>
         </div>
-        <div className="font-serif" style={{ fontSize: 22, marginBottom: 8 }}>
-          Manager Sign-in
+        <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, textAlign: "center" }}>
+          Login
         </div>
-        <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 28 }}>
-          Enter your numeric PIN (up to 10 digits) to access the dashboard.
+        <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 26, textAlign: "center" }}>
+          Enter your numeric PIN to access the dashboard
         </div>
 
-        <div className="form-group" style={{ marginBottom: 20 }}>
-          <label className="form-label">
-            <Lock size={12} style={{ display: "inline-block", marginRight: 6, verticalAlign: "middle" }} />
-            Manager PIN
-          </label>
+        <div className="form-group" style={{ marginBottom: 18 }}>
+          <label className="form-label">Manager PIN</label>
           <input
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
             value={pin}
             onChange={onPinChange}
-            placeholder="• • • • • •"
+            placeholder=""
             maxLength={10}
             autoFocus
             data-testid="login-pin-input"
@@ -80,23 +86,43 @@ export default function Login() {
           data-testid="login-submit-btn"
           style={{ width: "100%", padding: "14px", fontSize: 15 }}
         >
-          {loading ? "Signing in…" : "Sign In"}
+          {loading ? "Signing in…" : "Login"}
         </button>
 
-        <div style={{ textAlign: "center", marginTop: 18, fontSize: 12, color: "var(--muted)" }}>
-          Default PIN: <span style={{ color: "var(--gold)" }}>123456</span>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => setShowForgot(true)}
+            data-testid="forgot-pin-link"
+          >
+            Forgot PIN?
+          </button>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 24 }}>
+        <div style={{ textAlign: "center", marginTop: 22, fontSize: 12, color: "var(--muted)" }}>
+          New here?{" "}
+          <a
+            href="/signup"
+            style={{ color: "var(--gold)", textDecoration: "none" }}
+            data-testid="signup-link"
+          >
+            Create account
+          </a>
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 14 }}>
           <a
             href="/customer"
-            style={{ color: "var(--muted)", fontSize: 13, textDecoration: "none" }}
+            style={{ color: "var(--muted)", fontSize: 12, textDecoration: "none" }}
             data-testid="customer-view-link"
           >
             View customer menu →
           </a>
         </div>
       </form>
+
+      <ForgotPinDialog open={showForgot} onClose={() => setShowForgot(false)} />
     </div>
   );
 }

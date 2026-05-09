@@ -84,7 +84,7 @@ export default function BillModal({ order, settings, onClose }) {
             </div>
           )}
           <div className="b-center" style={{ textAlign: "center", fontWeight: 700, fontSize: 16 }}>
-            {s.restaurant_name || "TableTap Restaurant"}
+            {s.restaurant_name || "TableTaap Restaurant"}
           </div>
           {s.address && (
             <div className="b-center" style={{ textAlign: "center", fontSize: 11 }}>

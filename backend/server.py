@@ -69,13 +69,14 @@ class MenuItemUpdate(BaseModel):
 
 
 class RestaurantSettings(BaseModel):
-    restaurant_name: str = "TableTap Restaurant"
+    restaurant_name: str = "TableTaap Restaurant"
     logo_url: str = ""
     gst_number: str = ""
-    gst_rate: float = 5.0  # percent
+    gst_rate: Optional[float] = None  # empty by default — manager fills manually
     address: str = ""
     phone: str = ""
-    printer_type: str = "browser"  # browser | thermal-58mm | thermal-80mm
+    printer_type: str = "browser"
+    theme: str = "dark"  # "dark" | "light"
 
 
 class SettingsUpdate(BaseModel):
@@ -86,6 +87,7 @@ class SettingsUpdate(BaseModel):
     address: Optional[str] = None
     phone: Optional[str] = None
     printer_type: Optional[str] = None
+    theme: Optional[str] = None
 
 
 class OrderItem(BaseModel):
@@ -117,22 +119,130 @@ class LoginRequest(BaseModel):
     pin: str
 
 
+class SignupRequest(BaseModel):
+    manager_name: str
+    restaurant_name: str
+    contact_number: str
+    pin: str
+
+
+class ChangePinRequest(BaseModel):
+    old_pin: str
+    new_pin: str
+
+
+class RecoverPinRequest(BaseModel):
+    contact_number: str
+    new_pin: str
+
+
 class ImageUploadRequest(BaseModel):
     data: str  # base64 data URL
 
 
+def _validate_pin(pin: str):
+    if not pin or not pin.isdigit():
+        raise HTTPException(status_code=400, detail="PIN must be numeric")
+    if len(pin) < 4 or len(pin) > 10:
+        raise HTTPException(status_code=400, detail="PIN must be 4-10 digits")
+
+
 # ---------- Auth ----------
+async def _get_profile():
+    return await db.settings.find_one({"key": "manager_profile"}, {"_id": 0})
+
+
+@api_router.get("/auth/status")
+async def auth_status():
+    p = await _get_profile()
+    if p and p.get("pin"):
+        return {
+            "setup_complete": True,
+            "manager_name": p.get("manager_name", ""),
+            "restaurant_name": p.get("restaurant_name", ""),
+        }
+    return {"setup_complete": False}
+
+
+@api_router.post("/auth/signup")
+async def signup(req: SignupRequest):
+    existing = await _get_profile()
+    if existing and existing.get("pin"):
+        raise HTTPException(status_code=400, detail="Manager already registered. Use Login.")
+    if not req.manager_name.strip():
+        raise HTTPException(status_code=400, detail="Manager name required")
+    if not req.restaurant_name.strip():
+        raise HTTPException(status_code=400, detail="Restaurant name required")
+    digits = "".join(ch for ch in req.contact_number if ch.isdigit())
+    if len(digits) < 7:
+        raise HTTPException(status_code=400, detail="Valid contact number required")
+    _validate_pin(req.pin)
+
+    profile = {
+        "key": "manager_profile",
+        "manager_name": req.manager_name.strip(),
+        "restaurant_name": req.restaurant_name.strip(),
+        "contact_number": req.contact_number.strip(),
+        "pin": req.pin,
+    }
+    await db.settings.update_one({"key": "manager_profile"}, {"$set": profile}, upsert=True)
+    # Also reflect restaurant_name into RestaurantSettings for bill branding
+    await db.settings.update_one(
+        {"key": "restaurant"},
+        {"$set": {"restaurant_name": req.restaurant_name.strip(), "phone": req.contact_number.strip()}},
+        upsert=True,
+    )
+    return {"success": True, "token": f"mgr-{uuid.uuid4()}"}
+
+
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
-    if not req.pin.isdigit():
-        raise HTTPException(status_code=400, detail="PIN must be numeric")
-    if len(req.pin) < 1 or len(req.pin) > 10:
-        raise HTTPException(status_code=400, detail="PIN must be 1-10 digits")
-    settings = await db.settings.find_one({"key": "manager_pin"}, {"_id": 0})
-    stored = settings["value"] if settings else DEFAULT_PIN
+    _validate_pin(req.pin)
+    p = await _get_profile()
+    stored = p.get("pin") if p else None
+    if not stored:
+        # legacy fallback for installs that haven't signed up yet
+        legacy = await db.settings.find_one({"key": "manager_pin"}, {"_id": 0})
+        stored = legacy["value"] if legacy else None
+    if not stored:
+        raise HTTPException(status_code=404, detail="No manager registered. Please sign up first.")
     if req.pin != stored:
         raise HTTPException(status_code=401, detail="Incorrect PIN")
     return {"success": True, "token": f"mgr-{uuid.uuid4()}"}
+
+
+@api_router.post("/auth/change-pin")
+async def change_pin(req: ChangePinRequest):
+    p = await _get_profile()
+    stored = p.get("pin") if p else None
+    if not stored:
+        legacy = await db.settings.find_one({"key": "manager_pin"}, {"_id": 0})
+        stored = legacy["value"] if legacy else None
+    if not stored:
+        raise HTTPException(status_code=404, detail="No manager registered")
+    if req.old_pin != stored:
+        raise HTTPException(status_code=401, detail="Current PIN is incorrect")
+    _validate_pin(req.new_pin)
+    await db.settings.update_one(
+        {"key": "manager_profile"}, {"$set": {"pin": req.new_pin}}, upsert=True
+    )
+    return {"success": True}
+
+
+@api_router.post("/auth/recover-pin")
+async def recover_pin(req: RecoverPinRequest):
+    p = await _get_profile()
+    if not p or not p.get("contact_number"):
+        raise HTTPException(status_code=404, detail="No manager registered")
+    saved_digits = "".join(ch for ch in (p.get("contact_number") or "") if ch.isdigit())
+    given_digits = "".join(ch for ch in req.contact_number if ch.isdigit())
+    if not saved_digits or saved_digits[-7:] != given_digits[-7:]:
+        raise HTTPException(status_code=401, detail="Contact number does not match our records")
+    _validate_pin(req.new_pin)
+    await db.settings.update_one(
+        {"key": "manager_profile"}, {"$set": {"pin": req.new_pin}}, upsert=True
+    )
+    return {"success": True}
 
 
 # ---------- Categories ----------
@@ -361,10 +471,7 @@ async def seed():
             o = Order(order_number=num, table=table, items=ois, amount=amt, status=status, created_at=today)
             await db.orders.insert_one(o.model_dump())
 
-    # settings
-    if not await db.settings.find_one({"key": "manager_pin"}):
-        await db.settings.insert_one({"key": "manager_pin", "value": DEFAULT_PIN})
-
+    # restaurant settings (manager_pin is no longer auto-seeded — first-time signup creates the profile)
     if not await db.settings.find_one({"key": "restaurant"}):
         s = RestaurantSettings()
         await db.settings.insert_one({"key": "restaurant", **s.model_dump()})

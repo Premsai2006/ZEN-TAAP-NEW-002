@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ChefHat } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 
@@ -28,9 +27,8 @@ export default function Customer() {
     <div className="main" style={{ maxWidth: 1100, margin: "0 auto" }} data-testid="customer-page">
       <div className="topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ChefHat size={22} color="var(--gold)" />
-          <div className="page-title" style={{ fontSize: 26 }}>
-            TableTap Menu
+          <div className="brand-logo-wrap">
+            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 32 }} />
           </div>
         </div>
         <div className="live-pill">

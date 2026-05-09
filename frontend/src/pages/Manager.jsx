@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, ChefHat, Settings as SettingsIcon } from "lucide-react";
+import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
@@ -80,9 +80,10 @@ export default function Manager() {
   return (
     <div className="layout" data-testid="manager-dashboard">
       <aside className="sidebar">
-        <div className="brand">
-          <ChefHat size={20} style={{ display: "inline-block", marginRight: 8, verticalAlign: "middle" }} />
-          TableTap
+        <div style={{ marginBottom: 22, padding: "4px 8px" }}>
+          <div className="brand-logo-wrap">
+            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 30 }} />
+          </div>
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV.map((n) => {

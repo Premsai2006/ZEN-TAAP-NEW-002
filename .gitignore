@@ -88,3 +88,6 @@ credentials.json
 *.pem
 *.key
 .credentials
+archive
+(1).zip
+archive.zip
