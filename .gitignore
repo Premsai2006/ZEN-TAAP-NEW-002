@@ -91,3 +91,12 @@ credentials.json
 archive
 (1).zip
 archive.zip
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
