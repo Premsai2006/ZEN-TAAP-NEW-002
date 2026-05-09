@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 4 final verification: TableTaap rebrand + auth flow (login/signup/change-pin/recover-pin) + theme toggle + gst_rate empty default. Backend pytest: 17/18 passing (1 unrelated failure due to user-edited categories — categories 'Starters/Drinks/etc' were deleted by manager prior to this run; not a backend bug). Frontend Playwright: 30/30 checks passing — login page (logo, header 'Login', empty PIN placeholder, Forgot PIN dialog, Create-account link), wrong PIN 401 → error, PIN 4321 redirects to /manager, sidebar logo + all 5 full-text labels, topbar clock HH:MM AM/PM (no seconds), Bill modal renders with restaurant_name='Prem Sai Cafe' and CGST/SGST lines (gst_rate=12.5 in DB), Settings has theme toggle (data-theme dark↔light + localStorage tt_theme persists), Change PIN form, Recover via mobile form, GST input is type=number with 'Leave empty for no tax line' hint, Sales Today logout AlertDialog with YES/NO, Customer page uses /logo.png and shows 'Not Available' badges.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/settings (gst_rate)", "issue": "Backend filters None from update dict — once a numeric gst_rate is set, sending {gst_rate: null} cannot clear it (the field is dropped). Manager cannot un-set GST via API/UI without DB intervention. Consider treating explicit null as 'unset' (use $unset or accept None)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Topbar clock", "issues": ["Clock still renders lowercase 'am/pm' (e.g. '08:23 pm'). Spec asks for 'AM/PM' uppercase. Carried over from iteration 2 — apply .toUpperCase() or explicit Intl.DateTimeFormat with hour12:true."]},
+      {"screen": "Customer menu", "issues": ["A menu item titled 'kndfbkefb' (₹328) with a human face photo is currently visible in /customer (live data, not a bug). Manager should clean this up; mention only as awareness."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/pytest/iteration4_results.xml"
+  ],
+  "action_items": [
+    "(Optional, minor) Force topbar clock to uppercase AM/PM for spec compliance.",
+    "(Optional) Allow PUT /api/settings to clear gst_rate when explicit null is sent (currently None is filtered out, so a previously-set GST rate cannot be cleared via UI)."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_settings() builds `update = {k:v for k,v in body.model_dump().items() if v is not None}`. This means Optional[float] fields like gst_rate cannot be unset once assigned. Consider tri-state: missing = ignore, null = unset (use $unset), value = set.",
+    "auth status endpoint exposes manager_name and restaurant_name without authentication — acceptable for the unauth login screen UX but be aware this leaks brand identity to anonymous callers.",
+    "PIN stored in plaintext in MongoDB (db.settings.manager_profile.pin). Acceptable for a 4-digit PIN MVP but worth flagging — at minimum hash with bcrypt, or document this as accepted risk.",
+    "recover-pin only verifies last-7 digits of contact_number with no rate limiting — a brute-force could reset the PIN with sufficient guesses. Add a simple attempt counter / 60s cooldown.",
+    "/api/auth/signup and /api/auth/login return tokens but no other endpoint validates them; the API is effectively unauthenticated. Document this limitation or add a simple bearer-token check on writes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/memory/test_credentials.md"
+  ],
+  "success_rate": {"backend": "94% (17/18 — 1 fail unrelated, due to user-deleted seed categories)", "frontend": "100% (30/30)"},
+  "test_credentials": "Manager PIN: 4321 (restored after change-pin and recover-pin tests). Profile: Prem / Prem Sai Cafe / 9876543210.",
+  "seed_data_creation": "No new seed data created. Tests changed PIN twice (to 7531 then back to 4321; to 6543 via recover then back to 4321) and toggled theme/gst_rate temporarily — all reverted. Theme attribute briefly switched to light during test but final state was reverted.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Use PIN 4321 for all manager auth. test_iteration4.py covers all new auth + theme + null gst behaviour. data-testid prefixes confirmed working: login-pin-input, login-submit-btn, top-clock, nav-{orders|tables|menu|sales|settings}, generate-bill-{N}, bill-print-area, bill-close-btn, theme-toggle-btn. Backend filters None from PUT /api/settings — to clear gst_rate you must send {} via direct DB update. Old test_tabletap_api.py uses obsolete PIN 123456 — skip or update before reuse.",
+  "rca of the issue": "No blocker bugs. The single backend test failure was caused by the live manager having deleted the seed categories (Starters/Drinks/Breads/Desserts/Rice & Biryani) leaving only Biryani and Main Course — this is correct user behaviour, not a regression."
+}
