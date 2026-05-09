@@ -301,7 +301,8 @@ async def get_settings():
 
 @api_router.put("/settings", response_model=RestaurantSettings)
 async def update_settings(body: SettingsUpdate):
-    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Use exclude_unset so explicit null values (e.g. clearing gst_rate) are honored
+    update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
     await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
