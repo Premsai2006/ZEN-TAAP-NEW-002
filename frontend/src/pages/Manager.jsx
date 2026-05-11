@@ -26,23 +26,26 @@ export default function Manager() {
   const [categories, setCategories] = useState([]);
   const [stats, setStats] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [subscription, setSubscription] = useState(null);
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
   const refresh = async () => {
     try {
-      const [o, m, c, s, st] = await Promise.all([
+      const [o, m, c, s, st, sub] = await Promise.all([
         api.get("/orders"),
         api.get("/menu"),
         api.get("/categories"),
         api.get("/stats/today"),
         api.get("/settings"),
+        api.get("/subscription"),
       ]);
       setOrders(o.data);
       setMenu(m.data);
       setCategories(c.data);
       setStats(s.data);
       setSettings(st.data);
+      setSubscription(sub.data);
     } catch (err) {
       // silent retry — auto refresh
     }
@@ -113,7 +116,19 @@ export default function Manager() {
         </div>
       </aside>
 
-      <div className="main">
+      <div className={`main ${subscription?.view_only ? "view-only" : ""}`}>
+        {subscription?.view_only && (
+          <div className="view-only-banner" data-testid="view-only-banner">
+            <span>👁️ View-only mode — subscribe to unlock all features.</span>
+            <button
+              className="mini-btn primary"
+              onClick={() => navigate("/subscribe")}
+              data-testid="view-only-subscribe-btn"
+            >
+              Choose a Plan
+            </button>
+          </div>
+        )}
         <div className="topbar">
           <div className="page-title" data-testid="page-title">{activeNav?.label}</div>
           <div className="topbar-right">

@@ -1,7 +1,57 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
+
+const PinInput = ({ value, onChange, testId, autoFocus }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        type={show ? "text" : "password"}
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
+        maxLength={10}
+        autoFocus={autoFocus}
+        data-testid={testId}
+        style={{
+          letterSpacing: 4,
+          textAlign: "center",
+          padding: "10px 38px 10px 12px",
+          width: "100%",
+          background: "var(--bg)",
+          border: "1px solid var(--line)",
+          color: "var(--text)",
+          borderRadius: 8,
+          outline: "none",
+          fontSize: 14,
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        data-testid={`${testId}-toggle`}
+        title={show ? "Hide PIN" : "Show PIN"}
+        style={{
+          position: "absolute",
+          right: 8,
+          top: "50%",
+          transform: "translateY(-50%)",
+          background: "transparent",
+          border: "none",
+          color: "var(--muted)",
+          cursor: "pointer",
+          padding: 4,
+          display: "flex",
+        }}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+};
 
 export default function Signup() {
   const [form, setForm] = useState({
@@ -18,9 +68,7 @@ export default function Signup() {
   useEffect(() => {
     api
       .get("/auth/status")
-      .then((r) => {
-        setAccountExists(!!r.data.setup_complete);
-      })
+      .then((r) => setAccountExists(!!r.data.setup_complete))
       .catch(() => {});
   }, []);
 
@@ -43,8 +91,8 @@ export default function Signup() {
         pin: form.pin,
       });
       localStorage.setItem("mgr_token", data.token);
-      toast.success("Account created — welcome!");
-      navigate("/manager");
+      toast.success("Account created — pick your plan");
+      navigate("/subscribe");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Signup failed");
     } finally {
@@ -55,16 +103,14 @@ export default function Signup() {
   return (
     <div className="login-shell" data-testid="signup-page">
       <form className="login-card wide" onSubmit={submit} data-testid="signup-form">
-        <div style={{ textAlign: "center", marginBottom: 16 }}>
-          <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 40 }} />
-          </div>
+        <div style={{ textAlign: "center", marginBottom: 14 }}>
+          <img src="/logo.png" alt="TableTaap" style={{ height: 50, display: "block", margin: "0 auto" }} />
         </div>
         <div className="font-serif" style={{ fontSize: 24, marginBottom: 6, textAlign: "center" }}>
           Create your account
         </div>
-        <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 24, textAlign: "center" }}>
-          First-time setup — register your restaurant and choose your PIN.
+        <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22, textAlign: "center" }}>
+          Register your restaurant and choose your PIN.
         </div>
 
         {accountExists && (
@@ -81,7 +127,7 @@ export default function Signup() {
               textAlign: "center",
             }}
           >
-            An account is already registered on this device.{" "}
+            An account is already registered.{" "}
             <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>Login here</a>.
           </div>
         )}
@@ -109,7 +155,7 @@ export default function Signup() {
           />
         </div>
 
-        <div className="form-group" style={{ marginBottom: 12 }}>
+        <div className="form-group" style={{ marginBottom: 14 }}>
           <label className="form-label">Contact Number</label>
           <input
             type="tel"
@@ -127,29 +173,11 @@ export default function Signup() {
         <div className="form-row">
           <div className="form-group">
             <label className="form-label">Set PIN (4–10 digits)</label>
-            <input
-              type="password"
-              inputMode="numeric"
-              value={form.pin}
-              onChange={(e) => set("pin", e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
-              placeholder=""
-              maxLength={10}
-              data-testid="signup-pin"
-              style={{ letterSpacing: 4, textAlign: "center" }}
-            />
+            <PinInput value={form.pin} onChange={(v) => set("pin", v)} testId="signup-pin" />
           </div>
           <div className="form-group">
             <label className="form-label">Confirm PIN</label>
-            <input
-              type="password"
-              inputMode="numeric"
-              value={form.confirm_pin}
-              onChange={(e) => set("confirm_pin", e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
-              placeholder=""
-              maxLength={10}
-              data-testid="signup-confirm-pin"
-              style={{ letterSpacing: 4, textAlign: "center" }}
-            />
+            <PinInput value={form.confirm_pin} onChange={(v) => set("confirm_pin", v)} testId="signup-confirm-pin" />
           </div>
         </div>
 
@@ -158,12 +186,12 @@ export default function Signup() {
           className="submit-btn"
           disabled={loading}
           data-testid="signup-submit-btn"
-          style={{ width: "100%", padding: "14px", fontSize: 15, marginTop: 8 }}
+          style={{ width: "100%", padding: "14px", fontSize: 15, marginTop: 14 }}
         >
           {loading ? "Creating…" : "Create Account"}
         </button>
 
-        <div style={{ textAlign: "center", marginTop: 18, fontSize: 13, color: "var(--muted)" }}>
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "var(--muted)" }}>
           Already have an account?{" "}
           <a href="/login" style={{ color: "var(--gold)", textDecoration: "none" }} data-testid="back-to-login-link">
             Login

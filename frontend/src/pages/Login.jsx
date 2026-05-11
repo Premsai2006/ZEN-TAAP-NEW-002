@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
 
 export default function Login() {
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
@@ -47,9 +49,7 @@ export default function Login() {
     <div className="login-shell" data-testid="login-page">
       <form className="login-card" onSubmit={submit} data-testid="login-form">
         <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 44 }} />
-          </div>
+          <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 56, margin: "0 auto", display: "block" }} />
         </div>
         <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, textAlign: "center" }}>
           Login
@@ -60,23 +60,51 @@ export default function Login() {
 
         <div className="form-group" style={{ marginBottom: 18 }}>
           <label className="form-label">Manager PIN</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={pin}
-            onChange={onPinChange}
-            placeholder=""
-            maxLength={10}
-            autoFocus
-            data-testid="login-pin-input"
-            style={{
-              fontSize: 20,
-              letterSpacing: 6,
-              textAlign: "center",
-              padding: "16px 12px",
-            }}
-          />
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPin ? "text" : "password"}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={pin}
+              onChange={onPinChange}
+              placeholder=""
+              maxLength={10}
+              autoFocus
+              data-testid="login-pin-input"
+              style={{
+                fontSize: 20,
+                letterSpacing: 6,
+                textAlign: "center",
+                padding: "16px 44px 16px 12px",
+                width: "100%",
+                background: "var(--bg)",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+                borderRadius: 8,
+                outline: "none",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPin((v) => !v)}
+              data-testid="login-pin-toggle"
+              title={showPin ? "Hide PIN" : "Show PIN"}
+              style={{
+                position: "absolute",
+                right: 10,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                padding: 4,
+                display: "flex",
+              }}
+            >
+              {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
         </div>
 
         <button
@@ -100,18 +128,37 @@ export default function Login() {
           </button>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 22, fontSize: 12, color: "var(--muted)" }}>
-          New here?{" "}
+        {/* Highlighted Create Account CTA */}
+        <div
+          style={{
+            marginTop: 26,
+            padding: "14px 16px",
+            background: "rgba(232,125,47,0.10)",
+            border: "1px solid rgba(232,125,47,0.5)",
+            borderRadius: 12,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>New to TableTaap?</div>
           <a
             href="/signup"
-            style={{ color: "var(--gold)", textDecoration: "none" }}
+            style={{
+              display: "inline-block",
+              padding: "10px 22px",
+              background: "var(--gold)",
+              color: "white",
+              borderRadius: 8,
+              fontWeight: 600,
+              fontSize: 14,
+              textDecoration: "none",
+            }}
             data-testid="signup-link"
           >
-            Create account
+            ✨ Create Account
           </a>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 14 }}>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
           <a
             href="/customer"
             style={{ color: "var(--muted)", fontSize: 12, textDecoration: "none" }}

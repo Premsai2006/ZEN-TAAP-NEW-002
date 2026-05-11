@@ -72,11 +72,18 @@ class RestaurantSettings(BaseModel):
     restaurant_name: str = "TableTaap Restaurant"
     logo_url: str = ""
     gst_number: str = ""
-    gst_rate: Optional[float] = None  # empty by default — manager fills manually
+    gst_rate: Optional[float] = None
     address: str = ""
     phone: str = ""
     printer_type: str = "browser"
-    theme: str = "dark"  # "dark" | "light"
+    theme: str = "dark"
+    # Subscription
+    subscription_plan: Optional[str] = None  # "core" | "prime" | "elite"
+    subscription_status: str = "none"  # "none" | "trial" | "active" | "skipped"
+    trial_start: Optional[str] = None
+    trial_end: Optional[str] = None
+    autopay: bool = True
+    payment_method: Optional[str] = None  # "card" | "upi" | "netbanking"
 
 
 class SettingsUpdate(BaseModel):
@@ -88,6 +95,11 @@ class SettingsUpdate(BaseModel):
     phone: Optional[str] = None
     printer_type: Optional[str] = None
     theme: Optional[str] = None
+
+
+class SubscribeRequest(BaseModel):
+    plan: str  # "core" | "prime" | "elite"
+    payment_method: str  # "card" | "upi" | "netbanking"
 
 
 class OrderItem(BaseModel):
@@ -309,6 +321,69 @@ async def update_settings(body: SettingsUpdate):
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
     doc.pop("key", None)
     return RestaurantSettings(**doc)
+
+
+# ---------- Subscription ----------
+PLANS = {
+    "core": {"name": "Core", "price": 1299, "tagline": "For single-outlet restaurants"},
+    "prime": {"name": "Prime", "price": 2899, "tagline": "For growing multi-outlet brands"},
+    "elite": {"name": "Elite", "price": 6299, "tagline": "For chains & hospitality groups"},
+}
+
+
+@api_router.get("/subscription")
+async def get_subscription():
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    plan = doc.get("subscription_plan")
+    plan_info = PLANS.get(plan) if plan else None
+    return {
+        "plan": plan,
+        "plan_info": plan_info,
+        "status": doc.get("subscription_status", "none"),
+        "trial_start": doc.get("trial_start"),
+        "trial_end": doc.get("trial_end"),
+        "autopay": doc.get("autopay", True),
+        "payment_method": doc.get("payment_method"),
+        "view_only": doc.get("subscription_status") == "skipped",
+    }
+
+
+@api_router.post("/subscription")
+async def create_subscription(body: SubscribeRequest):
+    if body.plan not in PLANS:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+    if body.payment_method not in ("card", "upi", "netbanking"):
+        raise HTTPException(status_code=400, detail="Invalid payment method")
+    now = datetime.now(timezone.utc)
+    trial_end = now.replace() + (now - now)  # placeholder; below uses real timedelta
+    from datetime import timedelta
+    trial_end = now + timedelta(days=5)
+    update = {
+        "subscription_plan": body.plan,
+        "subscription_status": "trial",
+        "trial_start": now.isoformat(),
+        "trial_end": trial_end.isoformat(),
+        "autopay": True,
+        "payment_method": body.payment_method,
+    }
+    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+    return {
+        "success": True,
+        "plan": body.plan,
+        "plan_info": PLANS[body.plan],
+        "trial_start": update["trial_start"],
+        "trial_end": update["trial_end"],
+    }
+
+
+@api_router.post("/subscription/skip")
+async def skip_subscription():
+    await db.settings.update_one(
+        {"key": "restaurant"},
+        {"$set": {"subscription_status": "skipped", "subscription_plan": None}},
+        upsert=True,
+    )
+    return {"success": True, "view_only": True}
 
 
 @api_router.post("/menu", response_model=MenuItem)
