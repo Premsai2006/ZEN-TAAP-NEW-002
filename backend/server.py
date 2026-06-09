@@ -136,6 +136,14 @@ class SignupRequest(BaseModel):
     restaurant_name: str
     contact_number: str
     pin: str
+    email: Optional[str] = None
+
+
+class ProfileUpdate(BaseModel):
+    manager_name: Optional[str] = None
+    email: Optional[str] = None
+    contact_number: Optional[str] = None
+    restaurant_name: Optional[str] = None
 
 
 class ChangePinRequest(BaseModel):
@@ -195,6 +203,7 @@ async def signup(req: SignupRequest):
         "manager_name": req.manager_name.strip(),
         "restaurant_name": req.restaurant_name.strip(),
         "contact_number": req.contact_number.strip(),
+        "email": (req.email or "").strip(),
         "pin": req.pin,
     }
     await db.settings.update_one({"key": "manager_profile"}, {"$set": profile}, upsert=True)
@@ -255,6 +264,33 @@ async def recover_pin(req: RecoverPinRequest):
         {"key": "manager_profile"}, {"$set": {"pin": req.new_pin}}, upsert=True
     )
     return {"success": True}
+
+
+@api_router.get("/profile")
+async def get_profile():
+    p = await _get_profile() or {}
+    p.pop("pin", None)
+    p.pop("key", None)
+    return {
+        "manager_name": p.get("manager_name", ""),
+        "email": p.get("email", ""),
+        "contact_number": p.get("contact_number", ""),
+        "restaurant_name": p.get("restaurant_name", ""),
+    }
+
+
+@api_router.put("/profile")
+async def update_profile(body: ProfileUpdate):
+    update = body.model_dump(exclude_unset=True)
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.settings.update_one({"key": "manager_profile"}, {"$set": update}, upsert=True)
+    # mirror restaurant_name to settings for bill branding
+    if "restaurant_name" in update:
+        await db.settings.update_one(
+            {"key": "restaurant"}, {"$set": {"restaurant_name": update["restaurant_name"]}}, upsert=True
+        )
+    return await get_profile()
 
 
 # ---------- Categories ----------
@@ -459,6 +495,10 @@ async def stats_today():
     pending = sum(1 for o in orders if o["status"] == "new")
     active_tables = len({o["table"] for o in orders if o["status"] in ("new", "cooking")})
 
+    avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
+    # Gross profit assumes a 65% gross margin (industry standard for restaurants)
+    gross_profit = round(revenue * 0.65, 2)
+
     # top items
     counter = {}
     for o in orders:
@@ -469,13 +509,28 @@ async def stats_today():
             entry["revenue"] += it["qty"] * it["price"]
     top = sorted(counter.values(), key=lambda x: x["qty"], reverse=True)[:6]
 
-    # attach category for top items
+    # Build name->category map once
+    item_names = list({it_name for o in orders for it_name in (i["name"] for i in o["items"])})
+    items = (
+        await db.menu_items.find({"name": {"$in": item_names}}, {"_id": 0}).to_list(500)
+        if item_names else []
+    )
+    cat_map = {i["name"]: (i.get("category") or "Uncategorized") for i in items}
+
     if top:
-        names = [t["name"] for t in top]
-        items = await db.menu_items.find({"name": {"$in": names}}, {"_id": 0}).to_list(100)
-        cat_map = {i["name"]: i["category"] for i in items}
         for t in top:
-            t["category"] = cat_map.get(t["name"], "")
+            t["category"] = cat_map.get(t["name"], "Uncategorized")
+
+    # revenue by category
+    cat_rev = {}
+    for o in orders:
+        for it in o["items"]:
+            cat = cat_map.get(it["name"], "Uncategorized")
+            cat_rev[cat] = cat_rev.get(cat, 0) + it["qty"] * it["price"]
+    revenue_by_category = [
+        {"category": k, "revenue": round(v, 2), "percent": round((v / revenue * 100) if revenue else 0, 1)}
+        for k, v in sorted(cat_rev.items(), key=lambda x: x[1], reverse=True)
+    ]
 
     most_ordered = top[0]["name"] if top else "—"
     most_count = top[0]["qty"] if top else 0
@@ -486,10 +541,70 @@ async def stats_today():
         "completed": completed,
         "pending": pending,
         "active_tables": active_tables,
+        "avg_order_value": avg_order_value,
+        "gross_profit": gross_profit,
         "most_ordered": most_ordered,
         "most_count": most_count,
         "top_items": top,
+        "revenue_by_category": revenue_by_category,
     }
+
+
+@api_router.get("/stats/revenue")
+async def stats_revenue(period: str = "week"):
+    """Returns time-series revenue for charts. period in {today, yesterday, week, total}."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    series = []
+    if period == "today":
+        # hourly buckets for today
+        today_iso = today.isoformat()
+        orders = await db.orders.find({"created_at": {"$regex": f"^{today_iso}"}}, {"_id": 0}).to_list(2000)
+        buckets = {h: 0.0 for h in range(0, 24, 2)}
+        for o in orders:
+            try:
+                hr = datetime.fromisoformat(o["created_at"].replace("Z", "+00:00")).hour
+                key = (hr // 2) * 2
+                buckets[key] = buckets.get(key, 0) + o["amount"]
+            except Exception:
+                pass
+        for h in sorted(buckets):
+            series.append({"label": f"{h:02d}:00", "revenue": round(buckets[h], 2)})
+    elif period == "yesterday":
+        y = (today - timedelta(days=1)).isoformat()
+        orders = await db.orders.find({"created_at": {"$regex": f"^{y}"}}, {"_id": 0}).to_list(2000)
+        buckets = {h: 0.0 for h in range(0, 24, 2)}
+        for o in orders:
+            try:
+                hr = datetime.fromisoformat(o["created_at"].replace("Z", "+00:00")).hour
+                key = (hr // 2) * 2
+                buckets[key] = buckets.get(key, 0) + o["amount"]
+            except Exception:
+                pass
+        for h in sorted(buckets):
+            series.append({"label": f"{h:02d}:00", "revenue": round(buckets[h], 2)})
+    elif period == "week":
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            d_iso = d.isoformat()
+            orders = await db.orders.find({"created_at": {"$regex": f"^{d_iso}"}}, {"_id": 0}).to_list(2000)
+            total = sum(o["amount"] for o in orders)
+            series.append({"label": d.strftime("%a"), "revenue": round(total, 2)})
+    else:  # total — last 12 weeks
+        for i in range(11, -1, -1):
+            start = today - timedelta(days=(i + 1) * 7 - 1)
+            end = today - timedelta(days=i * 7)
+            from_re = start.isoformat()
+            to_re = end.isoformat()
+            orders = await db.orders.find(
+                {"created_at": {"$gte": from_re, "$lt": (end + timedelta(days=1)).isoformat()}}, {"_id": 0}
+            ).to_list(5000)
+            total = sum(o["amount"] for o in orders)
+            series.append({"label": start.strftime("%d %b"), "revenue": round(total, 2)})
+
+    grand_total = round(sum(p["revenue"] for p in series), 2)
+    return {"period": period, "series": series, "total": grand_total}
 
 
 # ---------- Image Upload ----------

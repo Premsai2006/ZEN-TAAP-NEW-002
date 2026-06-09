@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Receipt } from "lucide-react";
+import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
 import { api } from "@/lib/api";
 import BillModal from "@/components/manager/BillModal";
 
@@ -24,7 +24,9 @@ const timeAgo = (iso) => {
   return `${Math.floor(diff / 3600)} hr ago`;
 };
 
-export default function OrdersSection({ orders, stats, settings, onRefresh }) {
+const maskRevenue = (val) => "•".repeat(Math.max(4, String(val).length));
+
+export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh }) {
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
 
@@ -35,30 +37,58 @@ export default function OrdersSection({ orders, stats, settings, onRefresh }) {
     onRefresh();
   };
 
+  const revenue = stats?.revenue ?? 0;
+
   return (
     <div className="section active" data-testid="orders-section">
       <div className="stats-row">
         <div className="stat-card gold">
-          <div className="stat-label">Total Orders Today</div>
+          <div className="stat-label">
+            <ClipboardList size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+            Total Orders Today
+          </div>
           <div className="stat-value" data-testid="stat-total-orders">{stats?.total_orders ?? 0}</div>
           <div className="stat-sub">Live</div>
         </div>
+
         <div className="stat-card green">
-          <div className="stat-label">Revenue Today</div>
-          <div className="stat-value" data-testid="stat-revenue">₹{(stats?.revenue ?? 0).toLocaleString("en-IN")}</div>
+          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>
+              <Wallet size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+              Total Revenue
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowRevenue(!showRevenue)}
+              title={showRevenue ? "Hide" : "Show"}
+              data-testid="revenue-toggle-orders"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--muted)",
+                cursor: "pointer",
+                padding: 4,
+                display: "flex",
+              }}
+            >
+              {showRevenue ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <div className="stat-value" data-testid="stat-revenue">
+            {showRevenue ? `₹${revenue.toLocaleString("en-IN")}` : `₹${maskRevenue(revenue)}`}
+          </div>
           <div className="stat-sub">
-            Avg ₹{stats?.total_orders ? Math.round(stats.revenue / stats.total_orders) : 0}/order
+            Avg ₹{showRevenue && stats?.total_orders ? Math.round(revenue / stats.total_orders) : "•••"}/order
           </div>
         </div>
+
         <div className="stat-card">
-          <div className="stat-label">Active Tables</div>
+          <div className="stat-label">
+            <Users size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+            Active Tables
+          </div>
           <div className="stat-value" data-testid="stat-active-tables">{stats?.active_tables ?? 0}</div>
           <div className="stat-sub">In progress</div>
-        </div>
-        <div className="stat-card red">
-          <div className="stat-label">Pending Orders</div>
-          <div className="stat-value" data-testid="stat-pending">{stats?.pending ?? 0}</div>
-          <div className="stat-sub">Needs attention</div>
         </div>
       </div>
 
@@ -106,7 +136,9 @@ export default function OrdersSection({ orders, stats, settings, onRefresh }) {
                   <td style={{ fontWeight: 500, color: "var(--gold)" }}>#{o.order_number}</td>
                   <td>Table {o.table}</td>
                   <td style={{ fontSize: 13, color: "var(--muted)", maxWidth: 220 }}>{itemsLabel}</td>
-                  <td style={{ fontWeight: 500 }}>₹{o.amount}</td>
+                  <td style={{ fontWeight: 500 }}>
+                    {showRevenue ? `₹${o.amount}` : `₹${maskRevenue(o.amount)}`}
+                  </td>
                   <td style={{ color: "var(--muted)" }}>{timeAgo(o.created_at)}</td>
                   <td>{statusBadge(o.status)}</td>
                   <td>

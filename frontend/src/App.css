@@ -54,13 +54,17 @@ body {
 /* Brand */
 .brand-logo { height: 36px; display: block; }
 .brand-logo-wrap {
-  background: var(--logo-bg);
-  padding: 4px 10px;
-  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 16px;
+  border-radius: 10px;
   display: inline-block;
   line-height: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
-[data-theme="light"] .brand-logo-wrap { padding: 0; }
+[data-theme="light"] .brand-logo-wrap {
+  background: #ffffff;
+  border: 1px solid var(--line);
+}
 
 /* Layout */
 .layout { display: flex; min-height: 100vh; }
@@ -427,6 +431,59 @@ tr:last-child td { border-bottom: none; }
   font-size: 12px;
   line-height: 1;
   display: flex; align-items: center; justify-content: center;
+}
+
+/* Sales charts */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+.cat-breakdown {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.cat-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--line);
+}
+.cat-row:last-child { border-bottom: none; }
+.cat-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+}
+.cat-name { color: var(--text); }
+.cat-pct { color: var(--muted); font-size: 12px; }
+.cat-rev { color: var(--gold); font-weight: 600; }
+
+.qty-pill {
+  display: inline-block;
+  background: rgba(232,125,47,0.15);
+  border: 1px solid rgba(232,125,47,0.4);
+  color: var(--gold);
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .charts-row { grid-template-columns: 1fr; }
 }
 
 /* ===== View-only banner ===== */

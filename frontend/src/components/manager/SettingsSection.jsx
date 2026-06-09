@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ImageIcon, Save, KeyRound, Sun, Moon, Phone } from "lucide-react";
 import { api } from "@/lib/api";
 import { getTheme, setTheme as applyTheme } from "@/lib/theme";
+import { SubscriptionCard } from "@/components/manager/ProfileSection";
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -12,7 +14,8 @@ const fileToDataUrl = (file) =>
     r.readAsDataURL(file);
   });
 
-export default function SettingsSection({ settings, onRefresh }) {
+export default function SettingsSection({ settings, subscription, onRefresh }) {
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     restaurant_name: "",
     logo_url: "",
@@ -137,6 +140,14 @@ export default function SettingsSection({ settings, onRefresh }) {
 
   return (
     <div className="section active" data-testid="settings-section">
+      {/* Subscription summary */}
+      <SubscriptionCard
+        subscription={subscription}
+        status={subscription?.status || "none"}
+        planName={subscription?.plan_info?.name}
+        navigate={navigate}
+      />
+
       {/* Appearance */}
       <div className="add-item-card">
         <div className="font-serif" style={{ fontSize: 18, marginBottom: 14 }}>

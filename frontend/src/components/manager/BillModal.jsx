@@ -1,6 +1,9 @@
-import { Printer, X } from "lucide-react";
+import { useState } from "react";
+import { Printer, X, MessageCircle } from "lucide-react";
 
 export default function BillModal({ order, settings, onClose }) {
+  const [waPhone, setWaPhone] = useState("");
+  const [showWa, setShowWa] = useState(false);
   if (!order) return null;
   const s = settings || {};
   const subtotal = order.amount;
@@ -16,6 +19,43 @@ export default function BillModal({ order, settings, onClose }) {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const buildWhatsAppMessage = () => {
+    const lines = [];
+    lines.push(`*${s.restaurant_name || "TableTaap Restaurant"}*`);
+    if (s.address) lines.push(s.address);
+    if (s.phone) lines.push(`Ph: ${s.phone}`);
+    if (s.gst_number) lines.push(`GSTIN: ${s.gst_number}`);
+    lines.push(`-------------------------`);
+    lines.push(`Bill #${billNo}  |  Table ${order.table}`);
+    lines.push(dateStr);
+    lines.push(`-------------------------`);
+    for (const it of order.items) {
+      lines.push(`${it.name} x${it.qty}  ₹${(it.qty * it.price).toFixed(2)}`);
+    }
+    lines.push(`-------------------------`);
+    lines.push(`Subtotal: ₹${subtotal.toFixed(2)}`);
+    if (gstRate > 0) {
+      lines.push(`CGST (${(s.gst_rate / 2).toFixed(1)}%): ₹${cgst.toFixed(2)}`);
+      lines.push(`SGST (${(s.gst_rate / 2).toFixed(1)}%): ₹${sgst.toFixed(2)}`);
+    }
+    lines.push(`*TOTAL: ₹${total.toFixed(2)}*`);
+    lines.push(``);
+    lines.push(`Thank you for dining with us! 🙏`);
+    return lines.join("\n");
+  };
+
+  const sendWhatsApp = () => {
+    const digits = waPhone.replace(/[^0-9]/g, "");
+    if (digits.length < 7) {
+      setShowWa(true);
+      return;
+    }
+    const msg = encodeURIComponent(buildWhatsAppMessage());
+    // For Indian numbers default to 91 prefix if missing country code
+    const num = digits.length === 10 ? `91${digits}` : digits;
+    window.open(`https://wa.me/${num}?text=${msg}`, "_blank");
   };
 
   return (
@@ -158,20 +198,77 @@ export default function BillModal({ order, settings, onClose }) {
           </div>
         </div>
 
-        <div className="no-print" style={{ display: "flex", gap: 10, marginTop: 14 }}>
+        <div className="no-print" style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
           <button
             onClick={handlePrint}
             className="submit-btn"
             data-testid="bill-print-btn"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 140 }}
           >
             <Printer size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
             Print Bill
+          </button>
+          <button
+            onClick={() => setShowWa((v) => !v)}
+            className="submit-btn"
+            data-testid="bill-whatsapp-btn"
+            style={{ flex: 1, minWidth: 140, background: "#25D366", color: "white" }}
+          >
+            <MessageCircle size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+            Send via WhatsApp
           </button>
           <button onClick={onClose} className="submit-btn ghost" data-testid="bill-cancel-btn">
             Close
           </button>
         </div>
+        {showWa && (
+          <div
+            className="no-print"
+            data-testid="whatsapp-input-row"
+            style={{
+              marginTop: 12,
+              padding: 12,
+              background: "var(--bg)",
+              border: "1px solid var(--line)",
+              borderRadius: 10,
+            }}
+          >
+            <label className="form-label" style={{ marginBottom: 6, display: "block" }}>
+              Customer&apos;s WhatsApp number
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="tel"
+                value={waPhone}
+                onChange={(e) => setWaPhone(e.target.value)}
+                placeholder="e.g. 9876543210"
+                data-testid="whatsapp-phone-input"
+                style={{
+                  flex: 1,
+                  background: "var(--card)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                className="submit-btn"
+                onClick={sendWhatsApp}
+                data-testid="whatsapp-send-btn"
+                style={{ background: "#25D366", color: "white" }}
+              >
+                Send
+              </button>
+            </div>
+            <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 6 }}>
+              Opens WhatsApp with the bill pre-filled. India: 10 digits or with country code.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

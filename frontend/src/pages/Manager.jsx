@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon } from "lucide-react";
+import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
 import TablesSection from "@/components/manager/TablesSection";
 import MenuSection from "@/components/manager/MenuSection";
 import SalesSection from "@/components/manager/SalesSection";
+import ProfileSection from "@/components/manager/ProfileSection";
 import SettingsSection from "@/components/manager/SettingsSection";
 import LogoutDialog from "@/components/manager/LogoutDialog";
 
@@ -14,13 +15,15 @@ const NAV = [
   { key: "orders", label: "Live Orders", icon: ClipboardList },
   { key: "tables", label: "Tables", icon: Grid3x3 },
   { key: "menu", label: "Menu Management", icon: UtensilsCrossed },
-  { key: "sales", label: "Sales Today", icon: BarChart3 },
+  { key: "sales", label: "Sales", icon: BarChart3 },
+  { key: "profile", label: "Profile", icon: User },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export default function Manager() {
   const [active, setActive] = useState("orders");
   const [showLogout, setShowLogout] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(false);
   const [orders, setOrders] = useState([]);
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -141,7 +144,16 @@ export default function Manager() {
           </div>
         </div>
 
-        {active === "orders" && <OrdersSection orders={orders} stats={stats} settings={settings} onRefresh={refresh} />}
+        {active === "orders" && (
+          <OrdersSection
+            orders={orders}
+            stats={stats}
+            settings={settings}
+            showRevenue={showRevenue}
+            setShowRevenue={setShowRevenue}
+            onRefresh={refresh}
+          />
+        )}
         {active === "tables" && <TablesSection orders={orders} />}
         {active === "menu" && (
           <MenuSection
@@ -151,9 +163,15 @@ export default function Manager() {
           />
         )}
         {active === "sales" && (
-          <SalesSection stats={stats} onLogoutClick={() => setShowLogout(true)} />
+          <SalesSection
+            stats={stats}
+            showRevenue={showRevenue}
+            setShowRevenue={setShowRevenue}
+            onLogoutClick={() => setShowLogout(true)}
+          />
         )}
-        {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} />}
+        {active === "profile" && <ProfileSection subscription={subscription} onRefresh={refresh} />}
+        {active === "settings" && <SettingsSection settings={settings} subscription={subscription} onRefresh={refresh} />}
       </div>
 
       <LogoutDialog

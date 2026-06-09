@@ -19,6 +19,7 @@ export default function MenuSection({ menu, categories, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [newCat, setNewCat] = useState("");
+  const [showNewCatInput, setShowNewCatInput] = useState(false);
   const [search, setSearch] = useState("");
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -121,8 +122,10 @@ export default function MenuSection({ menu, categories, onRefresh }) {
     e.preventDefault();
     if (!newCat.trim()) return;
     try {
-      await api.post("/categories", { name: newCat.trim() });
+      const { data } = await api.post("/categories", { name: newCat.trim() });
+      setForm((f) => ({ ...f, category: data.name }));
       setNewCat("");
+      setShowNewCatInput(false);
       toast.success("Category added");
       onRefresh();
     } catch (err) {
@@ -155,52 +158,6 @@ export default function MenuSection({ menu, categories, onRefresh }) {
 
   return (
     <div className="section active" data-testid="menu-section">
-      {/* Categories management */}
-      <div className="add-item-card" data-testid="categories-card">
-        <div className="font-serif" style={{ fontSize: 16, marginBottom: 12 }}>
-          Categories
-        </div>
-        <div className="cat-chips">
-          {(categories || []).map((c) => (
-            <span key={c.id} className="cat-chip" data-testid={`cat-chip-${c.slug}`}>
-              {c.name}
-              <button
-                onClick={() => removeCategory(c)}
-                data-testid={`cat-remove-${c.slug}`}
-                title="Remove category"
-              >
-                <X size={14} />
-              </button>
-            </span>
-          ))}
-          {(!categories || categories.length === 0) && (
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>No categories yet.</div>
-          )}
-        </div>
-        <form onSubmit={addCategory} style={{ display: "flex", gap: 8 }}>
-          <input
-            type="text"
-            placeholder="New category name"
-            value={newCat}
-            onChange={(e) => setNewCat(e.target.value)}
-            data-testid="new-category-input"
-            style={{
-              flex: 1,
-              background: "var(--bg)",
-              border: "1px solid var(--line)",
-              color: "var(--text)",
-              padding: "10px 12px",
-              borderRadius: 8,
-              fontSize: 14,
-              outline: "none",
-            }}
-          />
-          <button type="submit" className="submit-btn" data-testid="add-category-btn">
-            <Plus size={14} style={{ marginRight: 4, display: "inline" }} /> Add
-          </button>
-        </form>
-      </div>
-
       {/* Add/Edit item */}
       <div className="add-item-card">
         <div
@@ -239,7 +196,20 @@ export default function MenuSection({ menu, categories, onRefresh }) {
           </div>
 
           <div className="form-group" style={{ marginBottom: 12 }}>
-            <label className="form-label">Category (optional)</label>
+            <label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Category (optional)</span>
+              {!showNewCatInput && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => setShowNewCatInput(true)}
+                  data-testid="show-new-cat-btn"
+                  style={{ fontSize: 12 }}
+                >
+                  + New category
+                </button>
+              )}
+            </label>
             <select
               value={form.category}
               onChange={(e) => set("category", e.target.value)}
@@ -252,6 +222,52 @@ export default function MenuSection({ menu, categories, onRefresh }) {
                 </option>
               ))}
             </select>
+            {showNewCatInput && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }} data-testid="inline-new-cat-row">
+                <input
+                  type="text"
+                  placeholder="New category name"
+                  value={newCat}
+                  onChange={(e) => setNewCat(e.target.value)}
+                  data-testid="new-category-input"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCategory(e);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    background: "var(--bg)",
+                    border: "1px solid var(--line)",
+                    color: "var(--text)",
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+                <button
+                  type="button"
+                  className="mini-btn primary"
+                  onClick={addCategory}
+                  data-testid="add-category-btn"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => {
+                    setShowNewCatInput(false);
+                    setNewCat("");
+                  }}
+                  data-testid="cancel-new-cat-btn"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="form-group" style={{ marginBottom: 12 }}>

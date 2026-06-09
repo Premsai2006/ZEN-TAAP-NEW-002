@@ -49,7 +49,9 @@ export default function Login() {
     <div className="login-shell" data-testid="login-page">
       <form className="login-card" onSubmit={submit} data-testid="login-form">
         <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 56, margin: "0 auto", display: "block" }} />
+          <div className="brand-logo-wrap" style={{ display: "inline-block" }}>
+            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 56 }} />
+          </div>
         </div>
         <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, textAlign: "center" }}>
           Login
@@ -128,33 +130,22 @@ export default function Login() {
           </button>
         </div>
 
-        {/* Highlighted Create Account CTA */}
-        <div
-          style={{
-            marginTop: 26,
-            padding: "14px 16px",
-            background: "rgba(232,125,47,0.10)",
-            border: "1px solid rgba(232,125,47,0.5)",
-            borderRadius: 12,
-            textAlign: "center",
-          }}
-        >
+        {/* Create Account — bold and prominent (no highlight box) */}
+        <div style={{ textAlign: "center", marginTop: 28 }}>
           <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>New to TableTaap?</div>
           <a
             href="/signup"
             style={{
-              display: "inline-block",
-              padding: "10px 22px",
-              background: "var(--gold)",
-              color: "white",
-              borderRadius: 8,
-              fontWeight: 600,
-              fontSize: 14,
+              color: "var(--gold)",
+              fontWeight: 800,
+              fontSize: 22,
+              letterSpacing: 0.5,
               textDecoration: "none",
+              fontFamily: "'Playfair Display', serif",
             }}
             data-testid="signup-link"
           >
-            ✨ Create Account
+            Create Account →
           </a>
         </div>
 

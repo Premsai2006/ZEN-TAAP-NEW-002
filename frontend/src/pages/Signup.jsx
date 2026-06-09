@@ -58,6 +58,7 @@ export default function Signup() {
     manager_name: "",
     restaurant_name: "",
     contact_number: "",
+    email: "",
     pin: "",
     confirm_pin: "",
   });
@@ -88,6 +89,7 @@ export default function Signup() {
         manager_name: form.manager_name.trim(),
         restaurant_name: form.restaurant_name.trim(),
         contact_number: form.contact_number.trim(),
+        email: form.email.trim(),
         pin: form.pin,
       });
       localStorage.setItem("mgr_token", data.token);
@@ -155,7 +157,7 @@ export default function Signup() {
           />
         </div>
 
-        <div className="form-group" style={{ marginBottom: 14 }}>
+        <div className="form-group" style={{ marginBottom: 12 }}>
           <label className="form-label">Contact Number</label>
           <input
             type="tel"
@@ -168,6 +170,17 @@ export default function Signup() {
           <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
             Used to recover your PIN if you forget it.
           </span>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 14 }}>
+          <label className="form-label">Email (optional)</label>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => set("email", e.target.value)}
+            placeholder="you@restaurant.com"
+            data-testid="signup-email"
+          />
         </div>
 
         <div className="form-row">
