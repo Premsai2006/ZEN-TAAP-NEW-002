@@ -315,6 +315,27 @@ async def create_category(body: CategoryCreate):
     return cat
 
 
+@api_router.put("/categories/{cat_id}", response_model=Category)
+async def rename_category(cat_id: str, body: CategoryCreate):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Not found")
+    dup = await db.categories.find_one(
+        {"id": {"$ne": cat_id}, "name": {"$regex": f"^{name}$", "$options": "i"}}, {"_id": 0}
+    )
+    if dup:
+        raise HTTPException(status_code=400, detail="Another category with that name exists")
+    slug = name.lower().replace(" ", "-").replace("&", "and")
+    old_name = cat["name"]
+    await db.categories.update_one({"id": cat_id}, {"$set": {"name": name, "slug": slug}})
+    # Update referencing menu items
+    await db.menu_items.update_many({"category": old_name}, {"$set": {"category": name}})
+    return Category(id=cat_id, name=name, slug=slug)
+
+
 @api_router.delete("/categories/{cat_id}")
 async def delete_category(cat_id: str):
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
@@ -360,8 +381,79 @@ async def update_settings(body: SettingsUpdate):
     return RestaurantSettings(**doc)
 
 
-# ---------- Subscription (removed) ----------
-# Subscription endpoints intentionally removed.
+# ---------- Subscription (per-table pricing) ----------
+BASE_FEE = 299  # ₹/month
+PER_TABLE = 50  # ₹ per table per month
+GST_RATE = 0.18  # 18% GST on SaaS in India
+MIN_TABLES = 10
+MAX_TABLES = 60
+TRIAL_DAYS = 4
+
+
+def _compute_price(tables: int):
+    if tables < MIN_TABLES or tables > MAX_TABLES:
+        raise HTTPException(status_code=400, detail=f"Tables must be between {MIN_TABLES} and {MAX_TABLES}")
+    subtotal = BASE_FEE + PER_TABLE * tables
+    gst = round(subtotal * GST_RATE, 2)
+    total = round(subtotal + gst, 2)
+    return {
+        "tables": tables,
+        "base_fee": BASE_FEE,
+        "per_table": PER_TABLE,
+        "tables_subtotal": PER_TABLE * tables,
+        "subtotal": subtotal,
+        "gst_rate_pct": int(GST_RATE * 100),
+        "gst_amount": gst,
+        "total_with_tax": total,
+        "per_table_with_tax": round(total / tables, 2) if tables else 0,
+    }
+
+
+class SubscribeBody(BaseModel):
+    tables: int
+    payment_method: str  # "card" | "upi" | "netbanking" | "wallet"
+
+
+@api_router.get("/pricing")
+async def pricing(tables: int = 14):
+    return _compute_price(max(MIN_TABLES, min(MAX_TABLES, tables)))
+
+
+@api_router.get("/subscription")
+async def get_subscription():
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    return {
+        "tables": doc.get("subscription_tables"),
+        "subtotal": doc.get("subscription_subtotal"),
+        "gst": doc.get("subscription_gst"),
+        "total": doc.get("subscription_total"),
+        "status": doc.get("subscription_status", "none"),
+        "trial_start": doc.get("trial_start"),
+        "trial_end": doc.get("trial_end"),
+        "payment_method": doc.get("payment_method"),
+    }
+
+
+@api_router.post("/subscription")
+async def create_subscription(body: SubscribeBody):
+    if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
+        raise HTTPException(status_code=400, detail="Invalid payment method")
+    price = _compute_price(body.tables)
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    trial_end = now + timedelta(days=TRIAL_DAYS)
+    update = {
+        "subscription_tables": body.tables,
+        "subscription_subtotal": price["subtotal"],
+        "subscription_gst": price["gst_amount"],
+        "subscription_total": price["total_with_tax"],
+        "subscription_status": "trial",
+        "trial_start": now.isoformat(),
+        "trial_end": trial_end.isoformat(),
+        "payment_method": body.payment_method,
+    }
+    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+    return {"success": True, **price, "trial_start": update["trial_start"], "trial_end": update["trial_end"]}
 
 
 @api_router.post("/menu", response_model=MenuItem)
@@ -429,7 +521,9 @@ async def update_order(order_id: str, body: OrderUpdate):
 # ---------- Stats ----------
 @api_router.get("/stats/today")
 async def stats_today():
-    today_iso = datetime.now(timezone.utc).date().isoformat()
+    from datetime import timedelta
+    today = datetime.now(timezone.utc).date()
+    today_iso = today.isoformat()
     orders = await db.orders.find({"created_at": {"$regex": f"^{today_iso}"}}, {"_id": 0}).to_list(1000)
     total_orders = len(orders)
     revenue = sum(o["amount"] for o in orders)
@@ -438,8 +532,41 @@ async def stats_today():
     active_tables = len({o["table"] for o in orders if o["status"] in ("new", "cooking")})
 
     avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
-    # Gross profit assumes a 65% gross margin (industry standard for restaurants)
     gross_profit = round(revenue * 0.65, 2)
+
+    # 7-day vs prior-7-day growth
+    last_7_start = today - timedelta(days=6)
+    last_7_end = today + timedelta(days=1)
+    prev_7_start = today - timedelta(days=13)
+    prev_7_end = today - timedelta(days=6)
+
+    async def _agg(start_iso, end_iso):
+        os_ = await db.orders.find(
+            {"created_at": {"$gte": start_iso, "$lt": end_iso}}, {"_id": 0}
+        ).to_list(5000)
+        rev = sum(o["amount"] for o in os_)
+        comp = sum(1 for o in os_ if o["status"] in ("done", "delivered"))
+        return {
+            "orders": len(os_),
+            "revenue": rev,
+            "completed": comp,
+            "aov": round(rev / len(os_), 2) if os_ else 0,
+        }
+
+    current = await _agg(last_7_start.isoformat(), last_7_end.isoformat())
+    prior = await _agg(prev_7_start.isoformat(), prev_7_end.isoformat())
+
+    def _grow(c, p):
+        if p == 0:
+            return 100.0 if c > 0 else 0.0
+        return round((c - p) / p * 100, 1)
+
+    growth_7d = {
+        "revenue": _grow(current["revenue"], prior["revenue"]),
+        "orders": _grow(current["orders"], prior["orders"]),
+        "completed": _grow(current["completed"], prior["completed"]),
+        "aov": _grow(current["aov"], prior["aov"]),
+    }
 
     # top items
     counter = {}
@@ -451,19 +578,21 @@ async def stats_today():
             entry["revenue"] += it["qty"] * it["price"]
     top = sorted(counter.values(), key=lambda x: x["qty"], reverse=True)[:6]
 
-    # Build name->category map once
     item_names = list({it_name for o in orders for it_name in (i["name"] for i in o["items"])})
     items = (
         await db.menu_items.find({"name": {"$in": item_names}}, {"_id": 0}).to_list(500)
         if item_names else []
     )
     cat_map = {i["name"]: (i.get("category") or "Uncategorized") for i in items}
+    img_map = {i["name"]: (i.get("images") or ([i.get("image_url")] if i.get("image_url") else []))[0] if i.get("images") or i.get("image_url") else "" for i in items}
+    emoji_map = {i["name"]: i.get("emoji", "🍽️") for i in items}
 
     if top:
         for t in top:
             t["category"] = cat_map.get(t["name"], "Uncategorized")
+            t["image"] = img_map.get(t["name"], "")
+            t["emoji"] = emoji_map.get(t["name"], "🍽️")
 
-    # revenue by category
     cat_rev = {}
     for o in orders:
         for it in o["items"]:
@@ -489,6 +618,7 @@ async def stats_today():
         "most_count": most_count,
         "top_items": top,
         "revenue_by_category": revenue_by_category,
+        "growth_7d": growth_7d,
     }
 
 

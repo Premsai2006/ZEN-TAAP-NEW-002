@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
+import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList, TrendingUp, TrendingDown } from "lucide-react";
 import { api } from "@/lib/api";
 import BillModal from "@/components/manager/BillModal";
 
@@ -26,6 +26,18 @@ const timeAgo = (iso) => {
 
 const maskRevenue = (val) => "•".repeat(Math.max(4, String(val).length));
 
+export const GrowthPill = ({ pct, label = "vs prev 7d" }) => {
+  const flat = pct === 0 || pct == null;
+  const up = pct > 0;
+  const cls = flat ? "flat" : up ? "" : "down";
+  return (
+    <span className={`growth-pill ${cls}`} title={label} data-testid="growth-pill">
+      {!flat && (up ? <TrendingUp size={11} /> : <TrendingDown size={11} />)}
+      {flat ? "—" : `${up ? "+" : ""}${pct}%`}
+    </span>
+  );
+};
+
 export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh }) {
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
@@ -38,24 +50,27 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
   };
 
   const revenue = stats?.revenue ?? 0;
+  const growth = stats?.growth_7d || {};
 
   return (
     <div className="section active" data-testid="orders-section">
-      <div className="stats-row">
+      <div className="stats-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat-card gold">
           <div className="stat-label">
             <ClipboardList size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
             Total Orders Today
           </div>
           <div className="stat-value" data-testid="stat-total-orders">{stats?.total_orders ?? 0}</div>
-          <div className="stat-sub">Live</div>
+          <div className="stat-sub">
+            <GrowthPill pct={growth.orders} /> Last 7 days
+          </div>
         </div>
 
         <div className="stat-card green">
           <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>
               <Wallet size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-              Total Revenue
+              Today Sales
             </span>
             <button
               type="button"
@@ -74,11 +89,11 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
               {showRevenue ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
-          <div className="stat-value" data-testid="stat-revenue">
+          <div className="stat-value" data-testid="stat-today-sales">
             {showRevenue ? `₹${revenue.toLocaleString("en-IN")}` : `₹${maskRevenue(revenue)}`}
           </div>
           <div className="stat-sub">
-            Avg ₹{showRevenue && stats?.total_orders ? Math.round(revenue / stats.total_orders) : "•••"}/order
+            <GrowthPill pct={growth.revenue} /> Last 7 days
           </div>
         </div>
 
@@ -89,6 +104,19 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
           </div>
           <div className="stat-value" data-testid="stat-active-tables">{stats?.active_tables ?? 0}</div>
           <div className="stat-sub">In progress</div>
+        </div>
+
+        <div className="stat-card" style={{ borderColor: "rgba(110,164,255,0.4)" }}>
+          <div className="stat-label">
+            <Receipt size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+            Orders Completed
+          </div>
+          <div className="stat-value" style={{ color: "#6ea4ff" }} data-testid="stat-orders-completed">
+            {stats?.completed ?? 0}
+          </div>
+          <div className="stat-sub">
+            <GrowthPill pct={growth.completed} /> Last 7 days
+          </div>
         </div>
       </div>
 

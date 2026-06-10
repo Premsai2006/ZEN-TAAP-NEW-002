@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -10,7 +10,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts";
 import {
   Wallet,
@@ -20,8 +19,10 @@ import {
   LogOut,
   Eye,
   EyeOff,
+  ImageIcon,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { GrowthPill } from "@/components/manager/OrdersSection";
 
 const COLORS = ["#e87d2f", "#5fb87a", "#6ea4ff", "#d96363", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6"];
 
@@ -32,7 +33,32 @@ const PERIODS = [
   { key: "total", label: "Total" },
 ];
 
+const Y_TICKS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000];
+
 const maskRev = (v) => "•".repeat(Math.max(4, String(v).length));
+
+const formatDM = (dStr) => {
+  // Convert backend label (e.g. "Mon" or "12 Jun" or "10:00") to "Mon 12" if needed
+  return dStr;
+};
+
+const buildXLabels = (period, series) => {
+  const today = new Date();
+  if (period === "week") {
+    // series[i].label is "Mon" "Tue" etc. We add date.
+    return series.map((p, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (series.length - 1 - i));
+      return { ...p, x: `${p.label} ${d.getDate()}` };
+    });
+  }
+  if (period === "total") {
+    // labels already "DD Mon"
+    return series.map((p) => ({ ...p, x: p.label }));
+  }
+  // today/yesterday — hourly labels, keep them
+  return series.map((p) => ({ ...p, x: p.label }));
+};
 
 export default function SalesSection({ stats, showRevenue, setShowRevenue, onLogoutClick }) {
   const [period, setPeriod] = useState("week");
@@ -51,10 +77,12 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
     value: c.revenue,
     percent: c.percent,
   }));
+  const growth = stats?.growth_7d || {};
+  const chartData = buildXLabels(period, series);
 
   return (
     <div className="section active" data-testid="sales-section">
-      {/* 4 stat cards */}
+      {/* 4 stat cards with growth pills */}
       <div className="stats-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat-card gold">
           <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -73,7 +101,9 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             </button>
           </div>
           <div className="stat-value" data-testid="sales-revenue">{fmt(stats?.revenue)}</div>
-          <div className="stat-sub">Today</div>
+          <div className="stat-sub">
+            <GrowthPill pct={growth.revenue} /> Last 7 days
+          </div>
         </div>
         <div className="stat-card green">
           <div className="stat-label">
@@ -81,7 +111,9 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             Orders Completed
           </div>
           <div className="stat-value" data-testid="sales-completed">{stats?.completed ?? 0}</div>
-          <div className="stat-sub">Today</div>
+          <div className="stat-sub">
+            <GrowthPill pct={growth.completed} /> Last 7 days
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">
@@ -89,7 +121,9 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             Avg Order Value
           </div>
           <div className="stat-value" data-testid="sales-aov">{fmt(stats?.avg_order_value)}</div>
-          <div className="stat-sub">Per order</div>
+          <div className="stat-sub">
+            <GrowthPill pct={growth.aov} /> Last 7 days
+          </div>
         </div>
         <div className="stat-card" style={{ borderColor: "rgba(192,132,252,0.4)" }}>
           <div className="stat-label">
@@ -105,7 +139,6 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
 
       {/* Charts row */}
       <div className="charts-row">
-        {/* Revenue overview */}
         <div className="chart-card" data-testid="revenue-chart-card">
           <div className="section-header">
             <div className="section-header-title">Revenue Overview</div>
@@ -124,16 +157,30 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
           </div>
           <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>
-              <LineChart data={series} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 10, right: 14, left: 6, bottom: 4 }}>
                 <defs>
-                  <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#e87d2f" stopOpacity={0.6} />
+                  <linearGradient id="revArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#e87d2f" stopOpacity={0.7} />
+                    <stop offset="60%" stopColor="#e87d2f" stopOpacity={0.25} />
                     <stop offset="100%" stopColor="#e87d2f" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" stroke="var(--muted)" tick={{ fontSize: 11 }} />
-                <YAxis stroke="var(--muted)" tick={{ fontSize: 11 }} tickFormatter={(v) => `₹${v}`} />
+                <XAxis
+                  dataKey="x"
+                  stroke="var(--muted)"
+                  tick={{ fontSize: 11, fill: "var(--muted)" }}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke="var(--muted)"
+                  ticks={Y_TICKS}
+                  domain={[0, 35000]}
+                  tickFormatter={(v) => (v === 0 ? "0" : `${v / 1000}k`)}
+                  tick={{ fontSize: 11, fill: "var(--muted)" }}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{
                     background: "var(--card-2)",
@@ -143,20 +190,20 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
                   }}
                   formatter={(v) => [showRevenue ? `₹${v.toLocaleString("en-IN")}` : `₹${maskRev(v)}`, "Revenue"]}
                 />
-                <Line
+                <Area
                   type="monotone"
                   dataKey="revenue"
                   stroke="#e87d2f"
                   strokeWidth={2.5}
-                  dot={{ fill: "#e87d2f", r: 3 }}
+                  fill="url(#revArea)"
+                  dot={{ fill: "#e87d2f", r: 3, strokeWidth: 0 }}
                   activeDot={{ r: 5 }}
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Revenue by category pie */}
         <div className="chart-card" data-testid="category-chart-card">
           <div className="section-header" style={{ marginBottom: 8 }}>
             <div className="section-header-title">Revenue by Category</div>
@@ -208,7 +255,7 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
         </div>
       </div>
 
-      {/* Top selling items */}
+      {/* Top selling items with images */}
       <div className="orders-section" data-testid="top-items-card">
         <div className="section-header">
           <div className="section-header-title">Top Selling Items</div>
@@ -232,7 +279,20 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             )}
             {(stats?.top_items || []).map((t) => (
               <tr key={t.name}>
-                <td style={{ fontWeight: 500 }}>{t.name}</td>
+                <td>
+                  <div className="top-item-row">
+                    <div className="top-item-img">
+                      {t.image ? (
+                        <img src={t.image} alt={t.name} />
+                      ) : t.emoji ? (
+                        <span>{t.emoji}</span>
+                      ) : (
+                        <ImageIcon size={18} color="var(--muted)" />
+                      )}
+                    </div>
+                    <span style={{ fontWeight: 500 }}>{t.name}</span>
+                  </div>
+                </td>
                 <td style={{ color: "var(--muted)" }}>{t.category || "—"}</td>
                 <td>
                   <span className="qty-pill">{t.qty}</span>
@@ -244,7 +304,6 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
         </table>
       </div>
 
-      {/* Logout box */}
       <div className="logout-box" data-testid="sales-logout-box">
         <div>
           <div style={{ fontWeight: 500, marginBottom: 2 }}>Session</div>

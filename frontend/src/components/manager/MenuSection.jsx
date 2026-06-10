@@ -197,7 +197,7 @@ export default function MenuSection({ menu, categories, onRefresh }) {
 
           <div className="form-group" style={{ marginBottom: 12 }}>
             <label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>Category (optional)</span>
+              <span>Category</span>
               {!showNewCatInput && (
                 <button
                   type="button"
@@ -210,18 +210,68 @@ export default function MenuSection({ menu, categories, onRefresh }) {
                 </button>
               )}
             </label>
-            <select
-              value={form.category}
-              onChange={(e) => set("category", e.target.value)}
-              data-testid="item-category-select"
-            >
-              <option value="">— Uncategorized —</option>
-              {(categories || []).map((c) => (
-                <option key={c.id} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <select
+                value={form.category}
+                onChange={(e) => set("category", e.target.value)}
+                data-testid="item-category-select"
+                style={{ flex: 1 }}
+              >
+                <option value="">— Uncategorized —</option>
+                {(categories || []).map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {form.category && (
+                <>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => {
+                      const cat = (categories || []).find((c) => c.name === form.category);
+                      if (!cat) return;
+                      const newName = window.prompt("Rename category to:", cat.name);
+                      if (!newName || !newName.trim() || newName.trim() === cat.name) return;
+                      api
+                        .put(`/categories/${cat.id}`, { name: newName.trim() })
+                        .then(() => {
+                          toast.success("Category renamed");
+                          set("category", newName.trim());
+                          onRefresh();
+                        })
+                        .catch((err) => toast.error(err?.response?.data?.detail || "Failed"));
+                    }}
+                    data-testid="edit-selected-cat-btn"
+                    title="Rename this category"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-btn danger"
+                    onClick={() => {
+                      const cat = (categories || []).find((c) => c.name === form.category);
+                      if (!cat) return;
+                      if (!window.confirm(`Delete "${cat.name}"? Items in this category will become Uncategorized.`)) return;
+                      api
+                        .delete(`/categories/${cat.id}`)
+                        .then(() => {
+                          toast.success("Category removed");
+                          set("category", "");
+                          onRefresh();
+                        })
+                        .catch(() => toast.error("Failed"));
+                    }}
+                    data-testid="delete-selected-cat-btn"
+                    title="Delete this category"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </>
+              )}
+            </div>
             {showNewCatInput && (
               <div style={{ display: "flex", gap: 8, marginTop: 8 }} data-testid="inline-new-cat-row">
                 <input

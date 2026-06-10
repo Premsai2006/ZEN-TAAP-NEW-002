@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
+import Subscribe from "@/pages/Subscribe";
 import Manager from "@/pages/Manager";
 import Customer from "@/pages/Customer";
 import { initTheme } from "@/lib/theme";
@@ -26,6 +27,14 @@ function App() {
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route
+            path="/subscribe"
+            element={
+              <RequireAuth>
+                <Subscribe />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/manager"
             element={
