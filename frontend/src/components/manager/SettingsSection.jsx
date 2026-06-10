@@ -37,18 +37,17 @@ export default function SettingsSection({ settings, onRefresh }) {
   const [recSaving, setRecSaving] = useState(false);
 
   useEffect(() => {
-    if (settings) {
-      setForm({
-        restaurant_name: settings.restaurant_name || "",
-        logo_url: settings.logo_url || "",
-        gst_number: settings.gst_number || "",
-        gst_rate: settings.gst_rate === null || settings.gst_rate === undefined ? "" : String(settings.gst_rate),
-        address: settings.address || "",
-        phone: settings.phone || "",
-        printer_type: settings.printer_type || "browser",
-      });
-    }
-  }, [settings?.restaurant_name, settings?.gst_rate]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!settings) return;
+    setForm({
+      restaurant_name: settings.restaurant_name || "",
+      logo_url: settings.logo_url || "",
+      gst_number: settings.gst_number || "",
+      gst_rate: settings.gst_rate === null || settings.gst_rate === undefined ? "" : String(settings.gst_rate),
+      address: settings.address || "",
+      phone: settings.phone || "",
+      printer_type: settings.printer_type || "browser",
+    });
+  }, [settings]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
