@@ -66,7 +66,27 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
   - 4-day FREE trial, QR codes per table, payment method (UPI default), endpoints `GET/POST /api/subscription`.
 - **Settings useEffect lint fix (iter-5)**: simplified deps to `[settings]`, removed unused `eslint-disable` directive, no regression.
 
-## Verified Tests (iteration_4.json — final)
+## Iteration 6 (2026-02-10) — 8 UX refinements
+1. **Sales chart X-axis** shows Month + Date (`12 Jun`) instead of just weekday — backend `/stats/revenue?period=week` now emits `label="DD Mon"` and a separate `weekday` field.
+2. **Top-right header clock** shows `Mon DD · HH:MM AM/PM` (e.g., `Jun 10 · 07:34 PM`).
+3. **Growth pills** use **triangle glyphs** (▲ / ▼) instead of lucide TrendingUp/Down icons. New CSS class `.growth-tri`.
+4. **Profile → Subscription summary card**: compact view with status pill (FREE TRIAL / ACTIVE), Tables count, Monthly Bill (incl. GST), Trial-end/Next-cycle date, and **Change Subscription** button → routes to `/subscribe`. NOT the full calculator embedded.
+5. **Deferred subscription change**: backend `POST /api/subscription` is now a state machine:
+   - `applied:"immediate"` when first-time / `status` is none/skipped → creates trial, sets `cycle_start` & `next_cycle_start` (~30d).
+   - `applied:"next_cycle"` when an active/trial sub exists and `tables` differs → saves to `pending_tables/pending_subtotal/pending_total`; current cycle remains unchanged. Backfills `cycle_start`/`next_cycle_start` for legacy subs that lacked them.
+   - `applied:"no_change"` when `tables` matches existing → clears pending, may update payment_method.
+   - GET returns: tables, total, status, trial_*, **pending_tables, pending_total, cycle_start, next_cycle_start**.
+   - Subscribe UI shows a `sub-change-notice` banner, pre-fills slider with current tables, and rewrites CTA to "Schedule change to N tables · effective <date>" when a change is pending.
+6. **Tables dashboard** occupied state uses a gold gradient + soft glow; empty state uses a dashed muted border. Visually distinct.
+7. **Signup logo** now wrapped in `.brand-logo-wrap` (white background card) for consistent branding.
+8. **Profile email** field labeled `(optional)` and saves with empty email.
+
+## Verified Tests (iteration_5.json)
+- Backend pytest **6/6 iter6** + 16/17 iter5 regression (1 expected schema change). 
+- Frontend Playwright: 10/11 visual checks confirmed (clock, growth triangles, profile subscription card, profile-change-sub-btn → /subscribe, email optional label, sub-change-notice, dynamic CTA, signup brand-logo-wrap white bg).
+- Post-fix: deferred path now backfills `cycle_start`/`next_cycle_start` for legacy subs; verified via curl.
+
+## Verified Tests (iteration_4.json — iter5 baseline)
 - Backend pytest **17/17 (100%)**: auth (PIN 4321 + wrong + signup-idempotent), settings GET/PUT, categories CRUD with rename, menu CRUD, orders create+status, `/stats/today` includes `growth_7d{revenue,orders,completed,aov}`, `/pricing` math (14 tables → ₹1178.82 incl GST), `/subscription` GET/POST with range 10–60.
 - Frontend Playwright **100%**: login PIN 4321 → /manager; Orders revenue eye-toggle + WhatsApp share; AreaChart with Y-ticks 0/5k/…/35k; Settings save (no lint regression); Subscribe shows Per-Table calculator (NOT 3-tier); Theme toggle persists.
 

@@ -496,12 +496,26 @@ async def create_subscription(body: SubscribeBody):
         )
         return {"success": True, "applied": "no_change", "tables": current_tables}
 
-    next_cycle_iso = existing.get("next_cycle_start") or (now + timedelta(days=30)).isoformat()
+    next_cycle_iso = existing.get("next_cycle_start")
+    cycle_start_iso = existing.get("cycle_start")
+    # Backfill cycle markers for legacy subscriptions that pre-date deferred-cycle support.
+    if not cycle_start_iso:
+        cycle_start_iso = existing.get("trial_start") or now.isoformat()
+    if not next_cycle_iso:
+        from datetime import datetime as _dt
+        try:
+            base = _dt.fromisoformat(cycle_start_iso.replace("Z", "+00:00"))
+        except Exception:
+            base = now
+        next_cycle_iso = (base + timedelta(days=30)).isoformat()
+
     pending_update = {
         "pending_tables": body.tables,
         "pending_subtotal": price["subtotal"],
         "pending_total": price["total_with_tax"],
         "payment_method": body.payment_method,
+        "cycle_start": cycle_start_iso,
+        "next_cycle_start": next_cycle_iso,
     }
     await db.settings.update_one({"key": "restaurant"}, {"$set": pending_update})
     return {
@@ -510,6 +524,7 @@ async def create_subscription(body: SubscribeBody):
         "current_tables": current_tables,
         "pending_tables": body.tables,
         "pending_total": price["total_with_tax"],
+        "cycle_start": cycle_start_iso,
         "next_cycle_start": next_cycle_iso,
     }
 
