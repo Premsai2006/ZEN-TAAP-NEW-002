@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList, TrendingUp, TrendingDown } from "lucide-react";
+import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
 import { api } from "@/lib/api";
 import BillModal from "@/components/manager/BillModal";
 
@@ -26,13 +26,16 @@ const timeAgo = (iso) => {
 
 const maskRevenue = (val) => "•".repeat(Math.max(4, String(val).length));
 
+// Triangle glyph: ▲ for up, ▼ for down. Used in growth pills.
 export const GrowthPill = ({ pct, label = "vs prev 7d" }) => {
   const flat = pct === 0 || pct == null;
   const up = pct > 0;
   const cls = flat ? "flat" : up ? "" : "down";
   return (
     <span className={`growth-pill ${cls}`} title={label} data-testid="growth-pill">
-      {!flat && (up ? <TrendingUp size={11} /> : <TrendingDown size={11} />)}
+      {!flat && (
+        <span className="growth-tri" aria-hidden="true">{up ? "▲" : "▼"}</span>
+      )}
       {flat ? "—" : `${up ? "+" : ""}${pct}%`}
     </span>
   );

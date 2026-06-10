@@ -1,12 +1,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 
 const MIN_T = 10;
 const MAX_T = 60;
 const fmtRupee = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
+};
 
 const PAYMENT_METHODS = [
   { key: "upi", label: "UPI", icon: Smartphone, note: "GPay · PhonePe · Paytm · BHIM" },
@@ -22,6 +26,7 @@ export default function Subscribe() {
   const [pricing, setPricing] = useState(null);
   const [method, setMethod] = useState("upi");
   const [paying, setPaying] = useState(false);
+  const [existing, setExisting] = useState(null);
 
   useEffect(() => {
     api
@@ -29,6 +34,21 @@ export default function Subscribe() {
       .then((r) => setPricing(r.data))
       .catch(() => {});
   }, [tables]);
+
+  // Load existing subscription once on mount; pre-fill slider with current tables.
+  useEffect(() => {
+    api
+      .get("/subscription")
+      .then((r) => {
+        setExisting(r.data);
+        if (r.data?.tables) setTables(r.data.tables);
+        if (r.data?.payment_method) setMethod(r.data.payment_method);
+      })
+      .catch(() => {});
+  }, []);
+
+  const hasActive = existing && existing.tables && existing.status && existing.status !== "none" && existing.status !== "skipped";
+  const isChangeRequest = hasActive && tables !== existing.tables;
 
   const monthLabel = useMemo(
     () => new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
@@ -45,8 +65,14 @@ export default function Subscribe() {
     if (!pricing) return;
     setPaying(true);
     try {
-      await api.post("/subscription", { tables, payment_method: method });
-      toast.success("Subscription active — 4-day free trial started!");
+      const { data } = await api.post("/subscription", { tables, payment_method: method });
+      if (data.applied === "next_cycle") {
+        toast.success(`Change scheduled — ${tables} tables will take effect from ${fmtDate(data.next_cycle_start)}.`);
+      } else if (data.applied === "no_change") {
+        toast.success("Payment method updated");
+      } else {
+        toast.success("Subscription active — 4-day free trial started!");
+      }
       navigate("/manager");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to subscribe");
@@ -108,6 +134,42 @@ export default function Subscribe() {
             </div>
           </div>
         </div>
+
+        {/* Active subscription banner: mid-cycle change applies next cycle */}
+        {hasActive && (
+          <div
+            data-testid="sub-change-notice"
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+              background: "rgba(232,125,47,0.08)",
+              border: "1px solid rgba(232,125,47,0.3)",
+              padding: "12px 16px",
+              borderRadius: 12,
+              marginBottom: 22,
+              color: "var(--text)",
+            }}
+          >
+            <RefreshCw size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
+            <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+              You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
+              {isChangeRequest ? (
+                <>
+                  Updating to <b>{tables} tables</b> will be billed from <b>{fmtDate(existing.next_cycle_start)}</b> (next cycle).
+                  Your current cycle continues unchanged.
+                </>
+              ) : (
+                <>Adjust the slider to change your plan. Mid-cycle changes take effect from <b>{fmtDate(existing.next_cycle_start)}</b>.</>
+              )}
+              {existing.pending_tables && existing.pending_tables !== existing.tables && (
+                <div style={{ marginTop: 6, color: "var(--gold)" }}>
+                  Pending change: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo).
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {tab === "calc" && pricing && (
           <>
@@ -240,7 +302,13 @@ export default function Subscribe() {
           data-testid="subscribe-btn"
           style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 22 }}
         >
-          {paying ? "Processing…" : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
+          {paying
+            ? "Processing…"
+            : hasActive
+              ? (isChangeRequest
+                  ? `Schedule change to ${tables} tables · effective ${fmtDate(existing.next_cycle_start)}`
+                  : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
+              : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
           <ShieldCheck size={12} /> Secured by 256-bit SSL · PCI DSS · UPI Autopay

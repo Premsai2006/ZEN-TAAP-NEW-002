@@ -244,11 +244,18 @@ tr:last-child td { border-bottom: none; }
   border-radius: 12px;
   padding: 22px;
   text-align: center;
-  transition: transform 0.15s;
+  transition: transform 0.15s, box-shadow 0.2s, border-color 0.2s;
 }
 .table-box:hover { transform: translateY(-2px); }
-.table-box.occupied { border-color: rgba(232,125,47,0.4); background: rgba(232,125,47,0.07); }
-.table-box.empty { opacity: 0.55; }
+.table-box.occupied {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(232,125,47,0.20), rgba(232,125,47,0.08));
+  box-shadow: 0 6px 18px rgba(232,125,47,0.22), inset 0 0 0 1px rgba(232,125,47,0.25);
+}
+.table-box.occupied .table-num { color: var(--gold); }
+.table-box.occupied .table-status-text { color: var(--gold); font-weight: 600; }
+.table-box.empty { background: transparent; border-style: dashed; opacity: 0.7; }
+.table-box.empty .table-num { color: var(--muted); }
 .table-num { font-family: 'Playfair Display', serif; font-size: 28px; }
 .table-status-text { color: var(--muted); font-size: 12px; margin: 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
 .table-amount { color: var(--gold); font-weight: 600; margin-top: 8px; }
@@ -761,6 +768,12 @@ tr:last-child td { border-bottom: none; }
 .growth-pill.flat {
   background: var(--card-2);
   color: var(--muted);
+}
+.growth-tri {
+  font-size: 9px;
+  line-height: 1;
+  display: inline-block;
+  transform: translateY(-0.5px);
 }
 
 /* Top selling row with image */

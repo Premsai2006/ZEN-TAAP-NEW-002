@@ -37,20 +37,10 @@ const Y_TICKS = [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000];
 
 const maskRev = (v) => "•".repeat(Math.max(4, String(v).length));
 
-const formatDM = (dStr) => {
-  // Convert backend label (e.g. "Mon" or "12 Jun" or "10:00") to "Mon 12" if needed
-  return dStr;
-};
-
 const buildXLabels = (period, series) => {
-  const today = new Date();
   if (period === "week") {
-    // series[i].label is "Mon" "Tue" etc. We add date.
-    return series.map((p, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() - (series.length - 1 - i));
-      return { ...p, x: `${p.label} ${d.getDate()}` };
-    });
+    // Backend now returns label like "12 Jun" — show it directly on X-axis.
+    return series.map((p) => ({ ...p, x: p.label }));
   }
   if (period === "total") {
     // labels already "DD Mon"

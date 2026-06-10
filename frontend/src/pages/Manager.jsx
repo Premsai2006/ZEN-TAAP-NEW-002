@@ -58,7 +58,7 @@ export default function Manager() {
   // Auto refresh every 1 second
   useInterval(refresh, 1000);
 
-  // Clock
+  // Clock with month + date
   useEffect(() => {
     const tick = () => {
       const d = new Date();
@@ -66,7 +66,9 @@ export default function Manager() {
       const m = d.getMinutes().toString().padStart(2, "0");
       const ampm = h >= 12 ? "PM" : "AM";
       h = h % 12 || 12;
-      setClock(`${h.toString().padStart(2, "0")}:${m} ${ampm}`);
+      const monthShort = d.toLocaleString("en-IN", { month: "short" });
+      const day = d.getDate();
+      setClock(`${monthShort} ${day} · ${h.toString().padStart(2, "0")}:${m} ${ampm}`);
     };
     tick();
     const id = setInterval(tick, 1000);

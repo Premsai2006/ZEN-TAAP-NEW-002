@@ -106,7 +106,9 @@ export default function Signup() {
     <div className="login-shell" data-testid="signup-page">
       <form className="login-card wide" onSubmit={submit} data-testid="signup-form">
         <div style={{ textAlign: "center", marginBottom: 14 }}>
-          <img src="/logo.png" alt="TableTaap" style={{ height: 50, display: "block", margin: "0 auto" }} />
+          <div className="brand-logo-wrap" data-testid="signup-brand">
+            <img src="/logo.png" alt="TableTaap" style={{ height: 50, display: "block" }} />
+          </div>
         </div>
         <div className="font-serif" style={{ fontSize: 24, marginBottom: 6, textAlign: "center" }}>
           Create your account

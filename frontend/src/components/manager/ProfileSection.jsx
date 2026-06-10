@@ -1,18 +1,36 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Mail, Phone, Store, User as UserIcon, Save } from "lucide-react";
+import { Mail, Phone, Store, User as UserIcon, Save, CreditCard, Calendar, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 
+const fmtINR = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+const fmtDate = (iso) => {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  } catch {
+    return "—";
+  }
+};
+
 export default function ProfileSection({ onRefresh }) {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState({ manager_name: "", email: "", contact_number: "", restaurant_name: "" });
+  const [subscription, setSubscription] = useState(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const loadSub = () => {
+    api.get("/subscription").then((r) => setSubscription(r.data)).catch(() => setSubscription(null));
+  };
 
   useEffect(() => {
     api
       .get("/profile")
       .then((r) => setProfile(r.data))
       .catch(() => {});
+    loadSub();
   }, []);
 
   const set = (k, v) => setProfile((p) => ({ ...p, [k]: v }));
@@ -38,6 +56,15 @@ export default function ProfileSection({ onRefresh }) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+
+  // Subscription summary helpers
+  const sub = subscription;
+  const subActive = sub && sub.tables && sub.status && sub.status !== "none" && sub.status !== "skipped";
+  const hasPending = sub && sub.pending_tables && sub.pending_tables !== sub.tables;
+
+  const subStatusLabel = sub?.status === "trial" ? "Free Trial" : sub?.status === "active" ? "Active" : "Not active";
+  const subStatusColor =
+    sub?.status === "trial" ? "var(--gold)" : sub?.status === "active" ? "var(--green)" : "var(--muted)";
 
   return (
     <div className="section active" data-testid="profile-section">
@@ -90,6 +117,108 @@ export default function ProfileSection({ onRefresh }) {
         </button>
       </div>
 
+      {/* Subscription Summary Card */}
+      <div className="add-item-card" data-testid="profile-subscription-card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div className="font-serif" style={{ fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}>
+            <CreditCard size={16} color="var(--gold)" />
+            Subscription
+          </div>
+          <span
+            data-testid="profile-sub-status"
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "3px 10px",
+              borderRadius: 999,
+              background: `${subStatusColor}22`,
+              color: subStatusColor,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            {subStatusLabel}
+          </span>
+        </div>
+
+        {subActive ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: hasPending ? 14 : 16 }}>
+              <div>
+                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Tables</div>
+                <div style={{ fontSize: 22, fontWeight: 600 }} data-testid="profile-sub-tables">{sub.tables}</div>
+              </div>
+              <div>
+                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Monthly Bill</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: "var(--gold)" }} data-testid="profile-sub-total">
+                  {fmtINR(sub.total)}
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 11 }}>incl. 18% GST</div>
+              </div>
+              <div>
+                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  {sub.status === "trial" ? "Trial Ends" : "Next Cycle"}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 500 }} data-testid="profile-sub-next">
+                  <Calendar size={12} style={{ display: "inline", marginRight: 5, verticalAlign: "middle" }} />
+                  {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.next_cycle_start)}
+                </div>
+              </div>
+            </div>
+
+            {hasPending && (
+              <div
+                data-testid="profile-sub-pending"
+                style={{
+                  background: "rgba(232,125,47,0.10)",
+                  border: "1px solid rgba(232,125,47,0.35)",
+                  color: "var(--gold)",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  fontSize: 13,
+                  marginBottom: 16,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <RefreshCw size={14} />
+                <span>
+                  <b>Change scheduled:</b> {sub.pending_tables} tables ({fmtINR(sub.pending_total)}/mo) will take effect from{" "}
+                  <b>{fmtDate(sub.next_cycle_start)}</b>. Current cycle continues at {sub.tables} tables.
+                </span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={() => navigate("/subscribe")}
+              data-testid="profile-change-sub-btn"
+              style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
+            >
+              <RefreshCw size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+              Change Subscription
+            </button>
+          </>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+              You don&apos;t have an active subscription yet. Start with a 4-day free trial.
+            </div>
+            <button
+              type="button"
+              className="mini-btn"
+              onClick={() => navigate("/subscribe")}
+              data-testid="profile-start-sub-btn"
+              style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
+            >
+              Choose a plan
+            </button>
+          </div>
+        )}
+      </div>
+
       {editing && (
         <form className="add-item-card" onSubmit={save} data-testid="profile-edit-form">
           <div className="font-serif" style={{ fontSize: 18, marginBottom: 14 }}>
@@ -125,7 +254,7 @@ export default function ProfileSection({ onRefresh }) {
             <div className="form-group">
               <label className="form-label">
                 <Mail size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                Email
+                Email <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span>
               </label>
               <input
                 type="email"

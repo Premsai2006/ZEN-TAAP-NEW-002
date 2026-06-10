@@ -431,6 +431,12 @@ async def get_subscription():
         "trial_start": doc.get("trial_start"),
         "trial_end": doc.get("trial_end"),
         "payment_method": doc.get("payment_method"),
+        # Deferred-change fields: mid-cycle changes take effect on next_cycle_start
+        "pending_tables": doc.get("pending_tables"),
+        "pending_subtotal": doc.get("pending_subtotal"),
+        "pending_total": doc.get("pending_total"),
+        "cycle_start": doc.get("cycle_start"),
+        "next_cycle_start": doc.get("next_cycle_start"),
     }
 
 
@@ -441,19 +447,71 @@ async def create_subscription(body: SubscribeBody):
     price = _compute_price(body.tables)
     from datetime import timedelta
     now = datetime.now(timezone.utc)
-    trial_end = now + timedelta(days=TRIAL_DAYS)
-    update = {
-        "subscription_tables": body.tables,
-        "subscription_subtotal": price["subtotal"],
-        "subscription_gst": price["gst_amount"],
-        "subscription_total": price["total_with_tax"],
-        "subscription_status": "trial",
-        "trial_start": now.isoformat(),
-        "trial_end": trial_end.isoformat(),
+    existing = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    current_status = existing.get("subscription_status", "none")
+    current_tables = existing.get("subscription_tables")
+
+    # First-time subscribe (or coming from "none") => activate immediately with trial.
+    if current_status in ("none", "skipped") or not current_tables:
+        trial_end = now + timedelta(days=TRIAL_DAYS)
+        cycle_start = now
+        next_cycle = cycle_start + timedelta(days=30)
+        update = {
+            "subscription_tables": body.tables,
+            "subscription_subtotal": price["subtotal"],
+            "subscription_gst": price["gst_amount"],
+            "subscription_total": price["total_with_tax"],
+            "subscription_status": "trial",
+            "trial_start": now.isoformat(),
+            "trial_end": trial_end.isoformat(),
+            "cycle_start": cycle_start.isoformat(),
+            "next_cycle_start": next_cycle.isoformat(),
+            "payment_method": body.payment_method,
+            "pending_tables": None,
+            "pending_subtotal": None,
+            "pending_total": None,
+        }
+        await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+        return {
+            "success": True,
+            "applied": "immediate",
+            **price,
+            "trial_start": update["trial_start"],
+            "trial_end": update["trial_end"],
+            "cycle_start": update["cycle_start"],
+            "next_cycle_start": update["next_cycle_start"],
+        }
+
+    # Existing active/trial subscription: defer change to next cycle.
+    if body.tables == current_tables:
+        # No change requested — clear any pending and just update payment method.
+        await db.settings.update_one(
+            {"key": "restaurant"},
+            {"$set": {
+                "payment_method": body.payment_method,
+                "pending_tables": None,
+                "pending_subtotal": None,
+                "pending_total": None,
+            }},
+        )
+        return {"success": True, "applied": "no_change", "tables": current_tables}
+
+    next_cycle_iso = existing.get("next_cycle_start") or (now + timedelta(days=30)).isoformat()
+    pending_update = {
+        "pending_tables": body.tables,
+        "pending_subtotal": price["subtotal"],
+        "pending_total": price["total_with_tax"],
         "payment_method": body.payment_method,
     }
-    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
-    return {"success": True, **price, "trial_start": update["trial_start"], "trial_end": update["trial_end"]}
+    await db.settings.update_one({"key": "restaurant"}, {"$set": pending_update})
+    return {
+        "success": True,
+        "applied": "next_cycle",
+        "current_tables": current_tables,
+        "pending_tables": body.tables,
+        "pending_total": price["total_with_tax"],
+        "next_cycle_start": next_cycle_iso,
+    }
 
 
 @api_router.post("/menu", response_model=MenuItem)
@@ -662,7 +720,7 @@ async def stats_revenue(period: str = "week"):
             d_iso = d.isoformat()
             orders = await db.orders.find({"created_at": {"$regex": f"^{d_iso}"}}, {"_id": 0}).to_list(2000)
             total = sum(o["amount"] for o in orders)
-            series.append({"label": d.strftime("%a"), "revenue": round(total, 2)})
+            series.append({"label": d.strftime("%d %b"), "weekday": d.strftime("%a"), "revenue": round(total, 2)})
     else:  # total — last 12 weeks
         for i in range(11, -1, -1):
             start = today - timedelta(days=(i + 1) * 7 - 1)
