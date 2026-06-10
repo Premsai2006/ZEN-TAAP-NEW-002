@@ -53,6 +53,27 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - Backend pytest 19/19 (100%): existing 13 + new tests for `/api/settings` GET/PUT, `MenuItem.images` backfill, optional category/emoji, multi-image PUT.
 - Frontend Playwright 18/18 (100%): all 8 changes verified end-to-end.
 
+## Iteration 3-5 (2026-02 — Rebrand + Sales + Per-Table Pricing)
+- **Rebrand**: TableTap → **TableTaap**, custom logo with white card background, removed sparkle emojis.
+- **Theme**: Dark/Light theme provider (`lib/theme.js`), persists via `localStorage tt_theme`, topbar toggle.
+- **Orders**: Today's Sales card with eye-toggle (mask revenue as `₹••••`); Bill modal adds **WhatsApp share** (`wa.me` redirect with formatted bill); removed Pending Orders KPI.
+- **Menu**: Inline category management consolidated inside "Add New Item" panel (add/rename/delete inline). Availability toggle per item.
+- **Sales**: Switched LineChart → **AreaChart** with custom Y-axis tick formatter (0, 5k, 10k, 15k…). Stat cards now show **7-day growth %** (revenue/orders/completed/AOV). Top selling items show item images.
+- **Settings**: Bill branding, GST number+rate, printer paper-width, manager profile fields.
+- **Profile**: Editable manager name + restaurant + contact + email.
+- **Subscription (replaced 3-tier Core/Prime/Elite)** with **Per-Table Pricing Calculator** at `/subscribe`:
+  - Slider 10–60 tables (default 14), formula: ₹299 base + ₹50 × tables + 18% GST.
+  - 4-day FREE trial, QR codes per table, payment method (UPI default), endpoints `GET/POST /api/subscription`.
+- **Settings useEffect lint fix (iter-5)**: simplified deps to `[settings]`, removed unused `eslint-disable` directive, no regression.
+
+## Verified Tests (iteration_4.json — final)
+- Backend pytest **17/17 (100%)**: auth (PIN 4321 + wrong + signup-idempotent), settings GET/PUT, categories CRUD with rename, menu CRUD, orders create+status, `/stats/today` includes `growth_7d{revenue,orders,completed,aov}`, `/pricing` math (14 tables → ₹1178.82 incl GST), `/subscription` GET/POST with range 10–60.
+- Frontend Playwright **100%**: login PIN 4321 → /manager; Orders revenue eye-toggle + WhatsApp share; AreaChart with Y-ticks 0/5k/…/35k; Settings save (no lint regression); Subscribe shows Per-Table calculator (NOT 3-tier); Theme toggle persists.
+
+## Test Credentials
+- Manager PIN: **4321** (file: `/app/memory/test_credentials.md`)
+- Profile: Prem / Prem Sai Cafe / 9876543210
+
 ## Backlog
 ### P1
 - Replace `window.confirm()` for category/item delete with a shadcn AlertDialog (testable + accessible).
@@ -67,5 +88,10 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - Multi-staff roles (kitchen / cashier / owner) with separate PINs.
 
 ## Next Action Items
+- (Optional) Add a **Subscribe** link/icon to the manager sidebar (currently `/subscribe` is direct-URL only).
+- (Optional) Silence Recharts `width(-1) height(-1)` console warnings on Sales tab initial mount via explicit ResponsiveContainer aspect.
+- (Optional) Allow `PUT /api/settings` to clear `gst_rate` when explicit `null` is sent (iter-3 carryover).
+- (Refactor) Split `server.py` (~765 lines) into `routers/{auth,menu,orders,stats,subscription}.py`.
+- (Security/P1) Bcrypt-hash manager PIN; add bearer-token check on write endpoints; rate-limit `recover-pin`.
 - Optional UX polish: dialog-based confirm for destructive actions; image picker accepting drag-drop.
 - Optional: Stripe integration for prepaid customer orders (when customer ordering is added).
