@@ -93,8 +93,8 @@ export default function Signup() {
         pin: form.pin,
       });
       localStorage.setItem("mgr_token", data.token);
-      toast.success("Account created — pick your plan");
-      navigate("/subscribe");
+      toast.success("Account created — welcome!");
+      navigate("/manager");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Signup failed");
     } finally {
