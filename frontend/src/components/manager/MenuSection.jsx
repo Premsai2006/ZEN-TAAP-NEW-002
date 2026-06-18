@@ -451,7 +451,7 @@ export default function MenuSection({ menu, categories, onRefresh }) {
             >
               <div className="menu-item-left">
                 <div className="menu-emoji">
-                  {primary ? <img src={primary} alt={it.name} /> : <ImageIcon size={22} color="var(--muted)" />}
+                  {primary ? <img src={primary} alt={it.name} /> : <span style={{ fontSize: 22 }}>🍽️</span>}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div className="menu-item-name">

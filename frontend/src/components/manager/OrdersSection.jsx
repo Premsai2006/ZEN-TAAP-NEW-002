@@ -21,7 +21,9 @@ const timeAgo = (iso) => {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (diff < 60) return `${Math.floor(diff)}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  return `${Math.floor(diff / 3600)} hr ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+  const days = Math.floor(diff / 86400);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 };
 
 const maskRevenue = (val) => "•".repeat(Math.max(4, String(val).length));

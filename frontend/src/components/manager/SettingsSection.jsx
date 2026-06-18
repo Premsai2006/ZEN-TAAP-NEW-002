@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { ImageIcon, Save, KeyRound, Sun, Moon, Phone } from "lucide-react";
+import { ImageIcon, Save, KeyRound, Sun, Moon, Phone, Users, Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
 import { getTheme, setTheme as applyTheme } from "@/lib/theme";
 
@@ -35,6 +35,41 @@ export default function SettingsSection({ settings, onRefresh }) {
   const [recContact, setRecContact] = useState("");
   const [recNewPin, setRecNewPin] = useState("");
   const [recSaving, setRecSaving] = useState(false);
+
+  // Customer PIN management (separate from manager PIN)
+  const [customerPin, setCustomerPin] = useState("");
+  const [newCustomerPin, setNewCustomerPin] = useState("");
+  const [showCustPin, setShowCustPin] = useState(false);
+  const [custPinSaving, setCustPinSaving] = useState(false);
+
+  const loadCustomerPin = () => {
+    api
+      .get("/settings/customer-pin")
+      .then((r) => setCustomerPin(r.data.customer_pin || ""))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadCustomerPin();
+  }, []);
+
+  const submitCustomerPin = async (e) => {
+    e.preventDefault();
+    if (!newCustomerPin) return toast.error("Enter a new Customer PIN");
+    if (newCustomerPin.length < 4 || newCustomerPin.length > 6)
+      return toast.error("Customer PIN must be 4–6 digits");
+    setCustPinSaving(true);
+    try {
+      await api.put("/settings/customer-pin", { new_pin: newCustomerPin });
+      toast.success("Customer PIN updated");
+      setCustomerPin(newCustomerPin);
+      setNewCustomerPin("");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to update");
+    } finally {
+      setCustPinSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!settings) return;
@@ -361,6 +396,69 @@ export default function SettingsSection({ settings, onRefresh }) {
         <button type="submit" className="submit-btn" disabled={pinSaving} data-testid="change-pin-btn">
           <KeyRound size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
           {pinSaving ? "Updating…" : "Update PIN"}
+        </button>
+      </form>
+
+      {/* Customer PIN management — separate PIN customers use to access /customer */}
+      <form className="add-item-card" onSubmit={submitCustomerPin} data-testid="customer-pin-form">
+        <div className="font-serif" style={{ fontSize: 18, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+          <Users size={16} color="var(--gold)" />
+          Customer Menu PIN
+        </div>
+        <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>
+          Customers need this 4–6 digit PIN to view the menu at <b>/customer</b>. This is independent of your Manager PIN — share it with guests at the table.
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">Current Customer PIN</label>
+            <div style={{ position: "relative" }}>
+              <input
+                type={showCustPin ? "text" : "password"}
+                value={customerPin}
+                readOnly
+                data-testid="current-customer-pin"
+                style={{ letterSpacing: 6, textAlign: "center", paddingRight: 38, background: "var(--bg)" }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowCustPin((v) => !v)}
+                data-testid="customer-pin-toggle"
+                title={showCustPin ? "Hide" : "Show"}
+                style={{
+                  position: "absolute",
+                  right: 8,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--muted)",
+                  cursor: "pointer",
+                  padding: 4,
+                  display: "flex",
+                }}
+              >
+                {showCustPin ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">New Customer PIN (4–6 digits)</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              value={newCustomerPin}
+              onChange={(e) => setNewCustomerPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              maxLength={6}
+              placeholder="e.g. 4321"
+              data-testid="new-customer-pin"
+              style={{ letterSpacing: 6, textAlign: "center" }}
+            />
+          </div>
+        </div>
+        <button type="submit" className="submit-btn" disabled={custPinSaving} data-testid="save-customer-pin-btn">
+          <Save size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+          {custPinSaving ? "Saving…" : "Update Customer PIN"}
         </button>
       </form>
 

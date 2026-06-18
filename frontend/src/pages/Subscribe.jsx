@@ -13,10 +13,53 @@ const fmtDate = (iso) => {
 };
 
 const PAYMENT_METHODS = [
-  { key: "upi", label: "UPI", icon: Smartphone, note: "GPay · PhonePe · Paytm · BHIM" },
-  { key: "card", label: "Credit / Debit Card", icon: CreditCard, note: "VISA · MasterCard · RuPay" },
-  { key: "netbanking", label: "Net Banking", icon: Building2, note: "All major Indian banks" },
-  { key: "wallet", label: "Wallets", icon: Wallet, note: "Paytm · MobiKwik · Freecharge · Amazon Pay" },
+  {
+    key: "upi",
+    label: "UPI",
+    icon: Smartphone,
+    note: "GPay · PhonePe · Paytm · BHIM",
+    brands: [
+      { sym: "G", cls: "gpay", title: "Google Pay" },
+      { sym: "PP", cls: "phonepe", title: "PhonePe" },
+      { sym: "P", cls: "paytm", title: "Paytm" },
+      { sym: "B", cls: "bhim", title: "BHIM" },
+    ],
+  },
+  {
+    key: "card",
+    label: "Credit / Debit Card",
+    icon: CreditCard,
+    note: "VISA · MasterCard · RuPay",
+    brands: [
+      { sym: "V", cls: "visa", title: "VISA" },
+      { sym: "◉◉", cls: "mc", title: "Mastercard" },
+      { sym: "R", cls: "rupay", title: "RuPay" },
+    ],
+  },
+  {
+    key: "netbanking",
+    label: "Net Banking",
+    icon: Building2,
+    note: "HDFC · ICICI · SBI · Axis",
+    brands: [
+      { sym: "H", cls: "hdfc", title: "HDFC" },
+      { sym: "I", cls: "icici", title: "ICICI" },
+      { sym: "S", cls: "sbi", title: "SBI" },
+      { sym: "A", cls: "axis", title: "Axis" },
+    ],
+  },
+  {
+    key: "wallet",
+    label: "Wallets",
+    icon: Wallet,
+    note: "Paytm · MobiKwik · Amazon Pay · Freecharge",
+    brands: [
+      { sym: "P", cls: "pt", title: "Paytm" },
+      { sym: "M", cls: "mb", title: "MobiKwik" },
+      { sym: "a", cls: "amzn", title: "Amazon Pay" },
+      { sym: "F", cls: "frc", title: "Freecharge" },
+    ],
+  },
 ];
 
 export default function Subscribe() {
@@ -56,10 +99,18 @@ export default function Subscribe() {
   );
 
   const trialEnd = useMemo(() => {
+    // For active/trial subs, use the backend-stored trial_end; otherwise compute new (+4d).
+    if (existing?.trial_end) {
+      try {
+        return new Date(existing.trial_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      } catch {
+        /* fall through */
+      }
+    }
     const d = new Date();
     d.setDate(d.getDate() + 4);
     return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-  }, []);
+  }, [existing]);
 
   const onSubscribe = async () => {
     if (!pricing) return;
@@ -127,10 +178,10 @@ export default function Subscribe() {
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
-              4-day FREE trial — cancel anytime
+              4-day FREE trial
             </div>
             <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-              You won't be charged until <b>{trialEnd}</b>. Pay only for the tables you actually have.
+              You won&apos;t be charged for the 4 days. Trial ends on <b>{trialEnd}</b>.
             </div>
           </div>
         </div>
@@ -152,7 +203,7 @@ export default function Subscribe() {
             }}
           >
             <RefreshCw size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
-            <div style={{ fontSize: 13, lineHeight: 1.55 }}>
+            <div style={{ fontSize: 13, lineHeight: 1.55, flex: 1 }}>
               You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
               {isChangeRequest ? (
                 <>
@@ -162,6 +213,24 @@ export default function Subscribe() {
               ) : (
                 <>Adjust the slider to change your plan. Mid-cycle changes take effect from <b>{fmtDate(existing.next_cycle_start)}</b>.</>
               )}
+              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }} data-testid="sub-cycle-dates">
+                <div className="cycle-pill cycle-pill-start">
+                  <Calculator size={13} style={{ display: "none" }} />
+                  <Gift size={13} style={{ display: "none" }} />
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
+                  <div>
+                    <div className="cycle-pill-label">Started</div>
+                    <div className="cycle-pill-value">{fmtDate(existing.cycle_start || existing.trial_start)}</div>
+                  </div>
+                </div>
+                <div className="cycle-pill cycle-pill-end">
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--gold)" }} />
+                  <div>
+                    <div className="cycle-pill-label">{existing.status === "trial" ? "Trial ends" : "Renews on"}</div>
+                    <div className="cycle-pill-value">{existing.status === "trial" ? fmtDate(existing.trial_end) : fmtDate(existing.next_cycle_start)}</div>
+                  </div>
+                </div>
+              </div>
               {existing.pending_tables && existing.pending_tables !== existing.tables && (
                 <div style={{ marginTop: 6, color: "var(--gold)" }}>
                   Pending change: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo).
@@ -290,6 +359,20 @@ export default function Subscribe() {
                 <Icon size={20} />
                 <div className="payment-card-label">{m.label}</div>
                 <div className="payment-card-note">{m.note}</div>
+                {m.brands && (
+                  <div className="pay-brands" data-testid={`pay-brands-${m.key}`}>
+                    {m.brands.map((b) => (
+                      <span
+                        key={b.cls}
+                        className={`pay-brand pay-brand-sym ${b.cls}`}
+                        title={b.title}
+                        aria-label={b.title}
+                      >
+                        {b.sym}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </button>
             );
           })}

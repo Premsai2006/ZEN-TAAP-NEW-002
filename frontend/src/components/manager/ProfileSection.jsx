@@ -109,11 +109,11 @@ export default function ProfileSection({ onRefresh }) {
           </div>
         </div>
         <button
-          className="mini-btn"
+          className="profile-edit-btn-highlight"
           onClick={() => setEditing((v) => !v)}
           data-testid="profile-edit-btn"
         >
-          {editing ? "Close" : "Edit"}
+          {editing ? "Close" : "Edit Profile"}
         </button>
       </div>
 
@@ -162,6 +162,36 @@ export default function ProfileSection({ onRefresh }) {
                 <div style={{ fontSize: 15, fontWeight: 500 }} data-testid="profile-sub-next">
                   <Calendar size={12} style={{ display: "inline", marginRight: 5, verticalAlign: "middle" }} />
                   {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.next_cycle_start)}
+                </div>
+              </div>
+            </div>
+
+            {/* Subscription cycle pills: start + end dates */}
+            <div
+              data-testid="profile-sub-dates"
+              style={{
+                display: "flex",
+                gap: 10,
+                paddingBottom: 16,
+                marginBottom: 16,
+                borderBottom: "1px solid var(--line)",
+                flexWrap: "wrap",
+              }}
+            >
+              <div className="cycle-pill cycle-pill-start" data-testid="profile-sub-started-pill">
+                <Calendar size={13} />
+                <div>
+                  <div className="cycle-pill-label">Started</div>
+                  <div className="cycle-pill-value" data-testid="profile-sub-started">{fmtDate(sub.cycle_start || sub.trial_start)}</div>
+                </div>
+              </div>
+              <div className="cycle-pill cycle-pill-end" data-testid="profile-sub-ends-pill">
+                <Calendar size={13} />
+                <div>
+                  <div className="cycle-pill-label">{sub.status === "trial" ? "Trial ends" : "Renews on"}</div>
+                  <div className="cycle-pill-value" data-testid="profile-sub-ends">
+                    {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.next_cycle_start)}
+                  </div>
                 </div>
               </div>
             </div>

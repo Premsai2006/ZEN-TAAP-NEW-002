@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User } from "lucide-react";
+import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
@@ -29,23 +29,26 @@ export default function Manager() {
   const [categories, setCategories] = useState([]);
   const [stats, setStats] = useState(null);
   const [settings, setSettings] = useState(null);
+  const [subscription, setSubscription] = useState(null);
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
   const refresh = async () => {
     try {
-      const [o, m, c, s, st] = await Promise.all([
+      const [o, m, c, s, st, sub] = await Promise.all([
         api.get("/orders"),
         api.get("/menu"),
         api.get("/categories"),
         api.get("/stats/today"),
         api.get("/settings"),
+        api.get("/subscription"),
       ]);
       setOrders(o.data);
       setMenu(m.data);
       setCategories(c.data);
       setStats(s.data);
       setSettings(st.data);
+      setSubscription(sub.data);
     } catch (err) {
       // silent retry — auto refresh
     }
@@ -130,6 +133,26 @@ export default function Manager() {
             </span>
           </div>
         </div>
+
+        {/* Explore Mode banner — shown when no active subscription. Manager can VIEW but not USE features. */}
+        {subscription && !["trial", "active"].includes(subscription.status) && (
+          <div className="explore-banner" data-testid="explore-mode-banner">
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, minWidth: 220 }}>
+              <Lock size={18} color="var(--gold)" />
+              <div className="explore-banner-text">
+                <b>Explore Mode</b> — You&apos;re browsing TableTaap without an active subscription. Start your 4-day free trial to place orders, generate bills and unlock all features.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="explore-banner-cta"
+              onClick={() => navigate("/subscribe")}
+              data-testid="explore-subscribe-btn"
+            >
+              Start Free Trial <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
 
         {active === "orders" && (
           <OrdersSection

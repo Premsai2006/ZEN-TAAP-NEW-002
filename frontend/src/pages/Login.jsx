@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, UtensilsCrossed, ChefHat, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
 
@@ -149,13 +149,35 @@ export default function Login() {
           </a>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 16 }}>
+        {/* Prominent access cards: Customer Menu + Kitchen Display */}
+        <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
           <a
             href="/customer"
-            style={{ color: "var(--muted)", fontSize: 12, textDecoration: "none" }}
+            className="role-card role-card-customer"
             data-testid="customer-view-link"
           >
-            View customer menu →
+            <div className="role-card-icon">
+              <UtensilsCrossed size={22} />
+            </div>
+            <div className="role-card-body">
+              <div className="role-card-title">Customer Menu</div>
+              <div className="role-card-sub">Browse & order</div>
+            </div>
+            <ArrowRight size={16} className="role-card-arrow" />
+          </a>
+          <a
+            href="/kitchen"
+            className="role-card role-card-kitchen"
+            data-testid="kitchen-view-link"
+          >
+            <div className="role-card-icon">
+              <ChefHat size={22} />
+            </div>
+            <div className="role-card-body">
+              <div className="role-card-title">Kitchen Display</div>
+              <div className="role-card-sub">Live tickets</div>
+            </div>
+            <ArrowRight size={16} className="role-card-arrow" />
           </a>
         </div>
       </form>

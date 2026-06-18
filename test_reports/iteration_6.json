@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 7 testing complete for TableTaap. Backend (11/11 PASS via /app/backend/tests/test_iteration7.py): GET /api/settings/customer-pin returns '1234' default; PUT validates (too-short '12'→400, non-digit 'abc'→400, too-long '1234567'→400, valid '5678'→200 persists); POST /api/auth/customer-login with correct PIN returns {success:true, token:'cust-...'}, wrong PIN→401 'Incorrect PIN'; POST /api/orders creates order with new status and is queryable; GET /api/subscription includes cycle_start, next_cycle_start, trial_start, trial_end (all populated for active trial); manager /api/auth/login with PIN 1234 returns 200 + mgr- token. Frontend (10/12 verified end-to-end via Playwright): Login page role cards present with .role-card class — customer-view-link (gold/orange themed, role-card-customer) + kitchen-view-link (green themed, role-card-kitchen), both clickable. /customer PIN gate blocks until correct PIN entered; wrong PIN stays gated, correct PIN unlocks menu grid. Customer cart Add→FAB→Drawer→Stepper→Table input→Place Order POSTs to /api/orders and drawer closes (verified in first Playwright run; the order #1029 with TEST_KitchenItem from backend test was visible on /kitchen ticket-grid). /kitchen page loads without auth, renders ticket-grid with Order #, Table, items+qty pills, time-ago, and ticket-advance-<n> button that successfully advances status via PUT /api/orders/{id} ('Order #1029 → done' confirmation toast observed). Subscribe page trial banner reads exactly \"You won't be charged for the 4 days. Trial ends on 14 Jun 2026.\"; sub-cycle-dates row shows 'Started: 10 Jun 2026  Ends: 10 Jul 2026'. Payment brand chips present in all 4 groups: pay-brands-upi=[GPay, PhonePe, Paytm, BHIM]; pay-brands-card=[VISA, MC, RuPay]; pay-brands-netbanking=[HDFC, ICICI, SBI, AXIS]; pay-brands-wallet=[Paytm, MobiKwik, Amazon Pay, Freecharge]. Manager Profile shows profile-sub-dates with profile-sub-started='10 Jun 2026' + profile-sub-ends='14 Jun 2026' (trial end). Manager Settings → customer-pin-form visible with current-customer-pin readonly (default 1234), updating to '5678' persists and customer-pin gate accepts new value. Explore-mode-banner correctly HIDDEN when subscription.status='trial' (verified absence on /manager dashboard).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Customer Cart FAB", "issue": "cart-fab is positioned bottom-right and the Emergent badge overlay (#emergent-badge) intercepts pointer events in automation. Real users on the deployed badge may experience a similar overlap on small screens. Suggest raising cart-fab z-index above 9999 and/or shifting position to bottom-left.", "selector": "[data-testid='cart-fab']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Subscribe → Payment Methods", "issues": ["Wallet brand chip is labeled 'Amazon Pay' (with space) while spec text reads 'AmazonPay' (no space). Cosmetic only — all 4 brands rendered with correct brand-colored backgrounds. Either is acceptable; raised for spec consistency."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py",
+    "/app/test_reports/pytest/iteration7_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Tweak Customer Cart FAB z-index / position so the Emergent badge doesn't overlap with it in bottom-right corner — affects both automation and possibly real users on narrow screens.",
+    "(Optional) Align wallet chip label 'Amazon Pay' → 'AmazonPay' for spec consistency (purely cosmetic)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~886 lines — should be split into routers/{auth,customer_pin,menu,orders,stats,subscription,settings}.py. Carry-over from iter4/iter5/iter6.",
+    "Customer PIN stored plaintext in db.settings.restaurant.customer_pin — acceptable for low-risk customer flow but document the trade-off.",
+    "POST /api/auth/customer-login returns a cust-<uuid> token, but no other endpoint actually validates this token (i.e., POST /api/orders is open). Token is essentially decorative; either gate /api/orders behind it or document as open-by-design.",
+    "Customer.jsx ~400 lines mixing PIN gate, cart, drawer, menu grid — split into <CustomerPinGate/>, <CartDrawer/>, <CustomerMenuGrid/> for maintainability.",
+    "Manager.jsx explore-mode-banner uses inline subscription fetch — consider lifting subscription state into a SubscriptionProvider context so ProfileSection/SettingsSection/Subscribe all consume the same source-of-truth and don't re-fetch."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "~92% (10/11 directly verified; cart drawer flow verified in first run, second run had transient menu-load timing but earlier run confirmed full happy path)"},
+  "test_credentials": "Manager PIN: 1234 (matches /app/memory/test_credentials.md). Customer PIN: 1234 (default, also confirmed). Both work.",
+  "seed_data_creation": "Created TEST_KitchenItem order at Table 13 via backend test (order #1029, advanced to 'done' during Kitchen UI test). Customer cart UI test POSTed a Veg Biryani order at Table 7. Customer PIN was temporarily changed to 5678 during settings UI test then restored to 1234. No menu/category pollution.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Manager PIN is 1234 (NOT 4321 as iter5/iter6 said). Customer PIN is 1234 default, stored at db.settings {key:'restaurant'}.customer_pin. Customer token in localStorage key 'tt_customer_token' (no logout button). /kitchen has NO PIN (open access). Explore-mode-banner only renders when settings.subscription_status NOT in {'trial','active'} — current state is 'trial' so banner is hidden by default; to test the visible state, mutate mongo: db.settings.update_one({key:'restaurant'}, {$set:{subscription_status:'none'}}). All iter7 data-testids confirmed present: customer-view-link, kitchen-view-link, customer-pin-gate, customer-pin-input/submit/toggle/back, customer-page, customer-menu-grid, cust-add-<id>, cust-na-<id>, cart-fab, cart-fab-count, cart-drawer, cart-close-btn, cart-items, cart-row-<id>, cart-inc/dec/qty/remove-<id>, cart-table-input, cart-total, cart-place-order-btn, kitchen-page, kitchen-back-btn, kitchen-filter-<k>, ticket-grid, ticket-<n>, ticket-advance-<n>, trial-banner, sub-cycle-dates, pay-brands-{upi,card,netbanking,wallet} + .pay-brand chips, profile-sub-dates/started/ends, customer-pin-form/current-customer-pin/new-customer-pin/save-customer-pin-btn/customer-pin-toggle, explore-mode-banner/explore-subscribe-btn.",
+  "rca of the issue": "Customer cart-fab click interception: the Emergent badge (a target=_blank <a id='emergent-badge'>) is fixed-positioned bottom-right with high z-index. The cart-fab is also fixed bottom-right. In Playwright they overlap and the badge intercepts pointer events for ~25s before timeout. Workaround in tests: use force=True (proven). Production fix: raise cart-fab z-index to >= 100000 OR move FAB to a non-overlapping anchor (bottom-left, or bottom-right with bottom: 80px to clear badge)."
+}

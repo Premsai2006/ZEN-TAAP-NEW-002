@@ -274,10 +274,8 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
                     <div className="top-item-img">
                       {t.image ? (
                         <img src={t.image} alt={t.name} />
-                      ) : t.emoji ? (
-                        <span>{t.emoji}</span>
                       ) : (
-                        <ImageIcon size={18} color="var(--muted)" />
+                        <span style={{ fontSize: 18 }}>🍽️</span>
                       )}
                     </div>
                     <span style={{ fontWeight: 500 }}>{t.name}</span>

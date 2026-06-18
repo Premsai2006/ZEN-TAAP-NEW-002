@@ -9,7 +9,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone, date
+import random
+from datetime import datetime, timezone, date, timedelta
 
 
 ROOT_DIR = Path(__file__).parent
@@ -84,6 +85,8 @@ class RestaurantSettings(BaseModel):
     trial_end: Optional[str] = None
     autopay: bool = True
     payment_method: Optional[str] = None  # "card" | "upi" | "netbanking"
+    # Customer PIN (4–6 digits) — separate from manager PIN. Default "1234".
+    customer_pin: str = "1234"
 
 
 class SettingsUpdate(BaseModel):
@@ -95,6 +98,24 @@ class SettingsUpdate(BaseModel):
     phone: Optional[str] = None
     printer_type: Optional[str] = None
     theme: Optional[str] = None
+
+
+class CustomerPinUpdate(BaseModel):
+    new_pin: str
+
+
+class CustomerLoginBody(BaseModel):
+    pin: str
+
+
+class RequestOtpBody(BaseModel):
+    contact_number: str
+
+
+class VerifyOtpBody(BaseModel):
+    contact_number: str
+    otp: str
+    new_pin: str
 
 
 class SubscribeRequest(BaseModel):
@@ -265,6 +286,92 @@ async def recover_pin(req: RecoverPinRequest):
         {"key": "manager_profile"}, {"$set": {"pin": req.new_pin}}, upsert=True
     )
     return {"success": True}
+
+
+# ---------- OTP-based PIN recovery ----------
+def _digits(s: str) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+@api_router.post("/auth/request-otp")
+async def request_otp(body: RequestOtpBody):
+    """Generate a 6-digit OTP for the registered phone number, store with 5-min TTL.
+    In production this would dispatch via SMS (Twilio etc.). For demo, the OTP is returned
+    in the response under `demo_otp` so the user can complete the flow without a gateway.
+    """
+    p = await _get_profile()
+    if not p or not p.get("contact_number"):
+        raise HTTPException(status_code=404, detail="No manager phone number on record")
+    saved = _digits(p.get("contact_number"))
+    given = _digits(body.contact_number)
+    if not saved or saved[-7:] != given[-7:]:
+        raise HTTPException(status_code=401, detail="Phone number does not match our records")
+    otp = f"{random.randint(0, 999999):06d}"
+    expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+    await db.otps.update_one(
+        {"key": "pin_reset"},
+        {"$set": {"otp": otp, "contact_last7": saved[-7:], "expires_at": expires.isoformat()}},
+        upsert=True,
+    )
+    masked = f"+91 •••••{saved[-4:]}" if len(saved) >= 4 else "your phone"
+    return {"success": True, "message": f"OTP sent to {masked}", "demo_otp": otp}
+
+
+@api_router.post("/auth/verify-otp")
+async def verify_otp(body: VerifyOtpBody):
+    rec = await db.otps.find_one({"key": "pin_reset"}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=400, detail="No OTP requested. Please request a new code.")
+    try:
+        expires = datetime.fromisoformat(rec["expires_at"].replace("Z", "+00:00"))
+    except Exception:
+        expires = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if datetime.now(timezone.utc) > expires:
+        raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
+    if rec.get("contact_last7") != _digits(body.contact_number)[-7:]:
+        raise HTTPException(status_code=401, detail="Phone number mismatch")
+    if rec.get("otp") != body.otp.strip():
+        raise HTTPException(status_code=401, detail="Incorrect OTP")
+    _validate_pin(body.new_pin)
+    await db.settings.update_one(
+        {"key": "manager_profile"}, {"$set": {"pin": body.new_pin}}, upsert=True
+    )
+    # Invalidate OTP after successful use
+    await db.otps.delete_one({"key": "pin_reset"})
+    return {"success": True}
+
+
+# ---------- Customer PIN (separate from manager PIN) ----------
+def _validate_customer_pin(pin: str):
+    if not pin or not pin.isdigit():
+        raise HTTPException(status_code=400, detail="Customer PIN must be digits only")
+    if len(pin) < 4 or len(pin) > 6:
+        raise HTTPException(status_code=400, detail="Customer PIN must be 4–6 digits")
+
+
+@api_router.post("/auth/customer-login")
+async def customer_login(body: CustomerLoginBody):
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    expected = doc.get("customer_pin", "1234")
+    if body.pin != expected:
+        raise HTTPException(status_code=401, detail="Incorrect PIN")
+    return {"success": True, "token": f"cust-{uuid.uuid4()}"}
+
+
+@api_router.put("/settings/customer-pin")
+async def update_customer_pin(body: CustomerPinUpdate):
+    _validate_customer_pin(body.new_pin)
+    await db.settings.update_one(
+        {"key": "restaurant"}, {"$set": {"customer_pin": body.new_pin}}, upsert=True
+    )
+    return {"success": True}
+
+
+@api_router.get("/settings/customer-pin")
+async def get_customer_pin():
+    """Manager-visible only — returns the current customer PIN so it can be displayed in Settings."""
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    return {"customer_pin": doc.get("customer_pin", "1234")}
 
 
 @api_router.get("/profile")
@@ -741,7 +848,6 @@ async def stats_revenue(period: str = "week"):
             start = today - timedelta(days=(i + 1) * 7 - 1)
             end = today - timedelta(days=i * 7)
             from_re = start.isoformat()
-            to_re = end.isoformat()
             orders = await db.orders.find(
                 {"created_at": {"$gte": from_re, "$lt": (end + timedelta(days=1)).isoformat()}}, {"_id": 0}
             ).to_list(5000)
@@ -811,6 +917,12 @@ async def seed():
     if not await db.settings.find_one({"key": "restaurant"}):
         s = RestaurantSettings()
         await db.settings.insert_one({"key": "restaurant", **s.model_dump()})
+    else:
+        # Ensure customer_pin is present on existing installs (backfill).
+        await db.settings.update_one(
+            {"key": "restaurant", "customer_pin": {"$exists": False}},
+            {"$set": {"customer_pin": "1234"}},
+        )
 
 
 @api_router.get("/")

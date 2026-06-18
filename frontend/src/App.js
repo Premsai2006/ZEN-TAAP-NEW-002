@@ -7,6 +7,7 @@ import Signup from "@/pages/Signup";
 import Subscribe from "@/pages/Subscribe";
 import Manager from "@/pages/Manager";
 import Customer from "@/pages/Customer";
+import Kitchen from "@/pages/Kitchen";
 import { initTheme } from "@/lib/theme";
 
 function RequireAuth({ children }) {
@@ -44,6 +45,7 @@ function App() {
             }
           />
           <Route path="/customer" element={<Customer />} />
+          <Route path="/kitchen" element={<Kitchen />} />
         </Routes>
       </BrowserRouter>
       <Toaster theme={localStorage.getItem("tt_theme") === "light" ? "light" : "dark"} position="top-right" />
