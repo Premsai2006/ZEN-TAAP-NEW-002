@@ -215,7 +215,7 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
                       dataKey="value"
                     >
                       {pieData.map((entry, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="none" />
+                        <Cell key={entry.name} fill={COLORS[i % COLORS.length]} stroke="none" />
                       ))}
                     </Pie>
                     <Tooltip
@@ -232,7 +232,7 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
               </div>
               <div className="cat-breakdown" data-testid="category-breakdown">
                 {pieData.map((c, i) => (
-                  <div className="cat-row" key={i}>
+                  <div className="cat-row" key={c.name}>
                     <span className="cat-dot" style={{ background: COLORS[i % COLORS.length] }} />
                     <span className="cat-name">{c.name}</span>
                     <span className="cat-pct">{c.percent}%</span>

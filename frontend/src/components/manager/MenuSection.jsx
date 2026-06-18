@@ -358,7 +358,7 @@ export default function MenuSection({ menu, categories, onRefresh }) {
             {form.images.length > 0 && (
               <div className="image-thumbs" data-testid="image-thumbs">
                 {form.images.map((src, i) => (
-                  <div key={i} className="image-thumb" data-testid={`image-thumb-${i}`}>
+                  <div key={`${src}-${i}`} className="image-thumb" data-testid={`image-thumb-${i}`}>
                     <img src={src} alt={`thumb-${i}`} />
                     <button
                       type="button"

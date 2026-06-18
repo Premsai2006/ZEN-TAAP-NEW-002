@@ -159,7 +159,7 @@ export default function BillModal({ order, settings, onClose }) {
             </thead>
             <tbody>
               {order.items.map((it, i) => (
-                <tr key={i}>
+                <tr key={`${it.name}-${i}`}>
                   <td style={{ padding: "2px 0", fontSize: 12, color: "#000", border: "none" }}>{it.name}</td>
                   <td style={{ padding: "2px 0", textAlign: "right", fontSize: 12, color: "#000", border: "none" }}>{it.qty}</td>
                   <td style={{ padding: "2px 0", textAlign: "right", fontSize: 12, color: "#000", border: "none" }}>

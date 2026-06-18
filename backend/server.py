@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-import random
+import secrets
 from datetime import datetime, timezone, date, timedelta
 
 
@@ -306,7 +306,7 @@ async def request_otp(body: RequestOtpBody):
     given = _digits(body.contact_number)
     if not saved or saved[-7:] != given[-7:]:
         raise HTTPException(status_code=401, detail="Phone number does not match our records")
-    otp = f"{random.randint(0, 999999):06d}"
+    otp = f"{secrets.randbelow(1_000_000):06d}"
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     await db.otps.update_one(
         {"key": "pin_reset"},

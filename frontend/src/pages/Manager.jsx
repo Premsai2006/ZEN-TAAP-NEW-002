@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
@@ -33,7 +33,7 @@ export default function Manager() {
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const [o, m, c, s, st, sub] = await Promise.all([
         api.get("/orders"),
@@ -50,13 +50,15 @@ export default function Manager() {
       setSettings(st.data);
       setSubscription(sub.data);
     } catch (err) {
-      // silent retry — auto refresh
+      // Silent on 1s poll loop — would spam the toast. Log so devs see it in console.
+      // eslint-disable-next-line no-console
+      console.warn("Manager.refresh failed:", err?.response?.status, err?.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
 
   // Auto refresh every 1 second
   useInterval(refresh, 1000);

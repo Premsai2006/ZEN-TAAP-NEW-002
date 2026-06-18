@@ -189,7 +189,7 @@ export default function Kitchen() {
               </div>
               <ul className="ticket-items">
                 {o.items.map((it, i) => (
-                  <li key={i}>
+                  <li key={`${o.id}-${it.name}-${i}`}>
                     <span>{it.name}</span>
                     <span className="qty-pill">×{it.qty}</span>
                   </li>

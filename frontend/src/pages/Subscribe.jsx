@@ -103,8 +103,10 @@ export default function Subscribe() {
     if (existing?.trial_end) {
       try {
         return new Date(existing.trial_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-      } catch {
-        /* fall through */
+      } catch (err) {
+        // Invalid stored ISO string — fall through to computed (+4d). Log so we can spot bad data.
+        // eslint-disable-next-line no-console
+        console.warn("Subscribe.trialEnd: bad existing.trial_end", existing.trial_end, err);
       }
     }
     const d = new Date();

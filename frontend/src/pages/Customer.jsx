@@ -250,8 +250,10 @@ export default function Customer() {
       const [m, c] = await Promise.all([api.get("/menu"), api.get("/categories")]);
       setMenu(m.data);
       setCategories(c.data);
-    } catch {
-      /* silent */
+    } catch (err) {
+      // 2s poll — don't toast on every failure, but log so devs catch network issues.
+      // eslint-disable-next-line no-console
+      console.warn("Customer.refresh failed:", err?.response?.status, err?.message);
     }
   };
 
