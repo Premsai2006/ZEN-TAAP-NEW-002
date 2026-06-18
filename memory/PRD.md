@@ -83,6 +83,35 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 
 ## Verified Tests (iteration_5.json)
 - Backend pytest **6/6 iter6** + 16/17 iter5 regression (1 expected schema change). 
+
+## Iteration 7 (2026-02-13) — Customer cart + Kitchen + Subscription gating
+- **Login page**: Customer Menu + Kitchen Display as prominent colored cards (gold/green) below the form.
+- **Customer dashboard PIN gate** (4–6 digits, separate from Manager PIN, default `1234`, changeable via Manager Settings → "Customer Menu PIN").
+- **Customer cart**: +/- qty stepper, drawer, table number input, place-order POSTs `/api/orders`.
+- **Kitchen Display** at `/kitchen` — open access, live ticket board, 1s auto-refresh, status advance buttons.
+- **Subscription explore-mode** banner appears across Manager when status is `none`/`skipped`.
+- **Subscription** trial banner copy: "You won't be charged for the 4 days. Trial ends on <date>".
+- **Realistic payment brand badges** on all 4 methods.
+- **Subscription cycle dates** (Started + Ends) shown in both Subscribe page and Profile section.
+- Backend: `customer_pin` field on RestaurantSettings; `POST /api/auth/customer-login`, `GET/PUT /api/settings/customer-pin`.
+
+## Iteration 8 (2026-02-13) — OTP recovery + UX polish
+- **OTP PIN recovery**: `POST /api/auth/request-otp` + `POST /api/auth/verify-otp` (5-min TTL, single-use). Demo build returns OTP in `demo_otp` field; production should gate via SMS gateway.
+- **ForgotPinDialog** rebuilt as 2-step Phone → OTP + New PIN flow.
+- **Subscription end-date pills** (gold/green `.cycle-pill` design) replace plain "Ends:" text in both Subscribe banner and Profile card.
+- **Payment method symbols** (no names): circular brand marks — G/PP/P/B (UPI), V/◉◉/R (Card), H/I/S/A (Banks), P/M/a/F (Wallets).
+- **Default 🍽️** emoji used everywhere there's no item image (Menu, Customer, Sales top items).
+- **Customer inline qty stepper + "Added × N" badge** on each menu card after adding.
+- **Kitchen stat tiles** (4): New Orders / Active Orders / Cooking / Delivered Today + manual Refresh button + Live · 1s pill.
+- **Profile Edit button** highlighted as gold pill with shadow ("Edit Profile").
+- **Live Orders timeAgo** shows "N day(s) ago" after 24h.
+- **cart-fab z-index 100001** so the Emergent floating badge no longer overlaps the cart button.
+
+## Verified Tests (iteration_7.json)
+- Backend pytest **9/9 (100%)**: OTP request/verify/single-use/expired/wrong-otp + all iter7 regression.
+- Frontend Playwright **14/14 (100%)**: forgot-pin OTP, payment symbols, cycle pills in both places, edit-button highlight, qty stepper + badge, kitchen 4 stats + refresh, live orders 'days ago', default 🍽️, cart-fab on top.
+- No issues. Carry-over code review notes: split server.py into routers; extract CustomerMenuCard; gate `demo_otp` behind env flag for production.
+
 - Frontend Playwright: 10/11 visual checks confirmed (clock, growth triangles, profile subscription card, profile-change-sub-btn → /subscribe, email optional label, sub-change-notice, dynamic CTA, signup brand-logo-wrap white bg).
 - Post-fix: deferred path now backfills `cycle_start`/`next_cycle_start` for legacy subs; verified via curl.
 
