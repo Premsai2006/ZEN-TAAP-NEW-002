@@ -92,7 +92,7 @@ export default function Manager() {
       <aside className="sidebar">
         <div style={{ marginBottom: 22, padding: "4px 8px" }}>
           <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 30 }} />
+            <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 30 }} />
           </div>
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
@@ -142,7 +142,7 @@ export default function Manager() {
             <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, minWidth: 220 }}>
               <Lock size={18} color="var(--gold)" />
               <div className="explore-banner-text">
-                <b>Explore Mode</b> — You&apos;re browsing TableTaap without an active subscription. Start your 4-day free trial to place orders, generate bills and unlock all features.
+                <b>Explore Mode</b> — You&apos;re browsing ZenTaap without an active subscription. Start your 4-day free trial to place orders, generate bills and unlock all features.
               </div>
             </div>
             <button
@@ -166,7 +166,7 @@ export default function Manager() {
             onRefresh={refresh}
           />
         )}
-        {active === "tables" && <TablesSection orders={orders} />}
+        {active === "tables" && <TablesSection orders={orders} subscription={subscription} />}
         {active === "menu" && (
           <MenuSection
             menu={menu}

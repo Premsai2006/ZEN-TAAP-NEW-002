@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Zap, Repeat } from "lucide-react";
 import { api } from "@/lib/api";
 
 const MIN_T = 10;
 const MAX_T = 60;
+const QR_DOMAIN = "https://zentaapqr.com";
 const fmtRupee = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
   if (!iso) return "—";
@@ -114,19 +116,79 @@ export default function Subscribe() {
     return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   }, [existing]);
 
+  const loadRazorpayScript = () =>
+    new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const s = document.createElement("script");
+      s.src = "https://checkout.razorpay.com/v1/checkout.js";
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      document.body.appendChild(s);
+    });
+
   const onSubscribe = async () => {
     if (!pricing) return;
     setPaying(true);
     try {
-      const { data } = await api.post("/subscription", { tables, payment_method: method });
-      if (data.applied === "next_cycle") {
-        toast.success(`Change scheduled — ${tables} tables will take effect from ${fmtDate(data.next_cycle_start)}.`);
-      } else if (data.applied === "no_change") {
-        toast.success("Payment method updated");
-      } else {
-        toast.success("Subscription active — 4-day free trial started!");
+      // 1) Persist plan choice on the backend (trial / deferred change).
+      const { data: planResp } = await api.post("/subscription", { tables, payment_method: method });
+
+      // 2) If we have a deferred next-cycle change, no payment is needed now.
+      if (planResp.applied === "next_cycle") {
+        toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
+        navigate("/manager");
+        return;
       }
-      navigate("/manager");
+      if (planResp.applied === "no_change") {
+        toast.success("Payment method updated");
+        navigate("/manager");
+        return;
+      }
+
+      // 3) Trial started — now launch Razorpay checkout for the first paid cycle.
+      //    (The trial is the 4-day free grace before the first charge.)
+      const { data: order } = await api.post("/payments/create-order", { tables });
+      if (!order.configured) {
+        // No API keys yet → fall back to public payment-page redirect.
+        toast.success("Trial started. Opening Razorpay payment page…");
+        window.open(`${order.fallback_link}?amount=${(order.amount / 100).toFixed(0)}`, "_blank");
+        navigate("/manager");
+        return;
+      }
+      const ok = await loadRazorpayScript();
+      if (!ok || !window.Razorpay) {
+        toast.error("Razorpay SDK failed to load — please retry.");
+        return;
+      }
+      const rzpOptions = {
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: "ZenTaap",
+        description: `${tables} tables · monthly subscription · autopay enabled`,
+        order_id: order.order_id,
+        theme: { color: "#e87d2f" },
+        prefill: { method },
+        notes: { tables: String(tables), enable_autopay: "true" },
+        handler: async (resp) => {
+          try {
+            await api.post("/payments/verify", {
+              razorpay_order_id: resp.razorpay_order_id,
+              razorpay_payment_id: resp.razorpay_payment_id,
+              razorpay_signature: resp.razorpay_signature,
+              enable_autopay: true,
+            });
+            toast.success("Payment successful — Autopay enabled for next cycles!");
+            navigate("/manager");
+          } catch (err) {
+            toast.error(err?.response?.data?.detail || "Payment verification failed");
+          }
+        },
+        modal: {
+          ondismiss: () => toast.info("Payment cancelled — trial continues, you can pay later."),
+        },
+      };
+      new window.Razorpay(rzpOptions).open();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to subscribe");
     } finally {
@@ -144,7 +206,7 @@ export default function Subscribe() {
         >
           <ArrowLeft size={16} /> Back
         </button>
-        <img src="/logo.png" alt="TableTaap" style={{ height: 38, background: "#fff", padding: "6px 12px", borderRadius: 10 }} />
+        <img src="/logo.png" alt="ZenTaap" style={{ height: 38, background: "#fff", padding: "6px 12px", borderRadius: 10 }} />
         <button
           onClick={() => navigate("/manager")}
           className="sub-skip-btn"
@@ -213,12 +275,10 @@ export default function Subscribe() {
                   Your current cycle continues unchanged.
                 </>
               ) : (
-                <>Adjust the slider to change your plan. Mid-cycle changes take effect from <b>{fmtDate(existing.next_cycle_start)}</b>.</>
+                <>Adjust the slider to change your plan. Mid-cycle changes take effect on the next cycle.</>
               )}
               <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }} data-testid="sub-cycle-dates">
                 <div className="cycle-pill cycle-pill-start">
-                  <Calculator size={13} style={{ display: "none" }} />
-                  <Gift size={13} style={{ display: "none" }} />
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
                   <div>
                     <div className="cycle-pill-label">Started</div>
@@ -228,8 +288,10 @@ export default function Subscribe() {
                 <div className="cycle-pill cycle-pill-end">
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--gold)" }} />
                   <div>
-                    <div className="cycle-pill-label">{existing.status === "trial" ? "Trial ends" : "Renews on"}</div>
-                    <div className="cycle-pill-value">{existing.status === "trial" ? fmtDate(existing.trial_end) : fmtDate(existing.next_cycle_start)}</div>
+                    <div className="cycle-pill-label">{existing.status === "trial" ? "Trial ends" : "Ends on"}</div>
+                    <div className="cycle-pill-value">
+                      {existing.status === "trial" ? fmtDate(existing.trial_end) : fmtDate(existing.cycle_end || existing.next_cycle_start)}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -246,7 +308,7 @@ export default function Subscribe() {
           <>
             {/* Calculator hero */}
             <div className="calc-hero" data-testid="calc-hero">
-              <div className="calc-label">TABLETAAP PRICING</div>
+              <div className="calc-label">ZENTAAP PRICING</div>
               <div className="calc-title">Pay for exactly what you use</div>
 
               <div className="slider-wrap">
@@ -289,6 +351,67 @@ export default function Subscribe() {
               </div>
             </div>
 
+            {/* QR codes preview — one QR per table */}
+            <div className="qr-preview-card" data-testid="qr-preview-card">
+              <div className="qr-preview-header">
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <QrCode size={18} color="var(--gold)" />
+                  <div>
+                    <div className="font-serif" style={{ fontSize: 18 }}>Your {tables} QR codes</div>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      One QR per table. Each scans to <code style={{ color: "var(--gold)" }}>{QR_DOMAIN}/customer?table=N</code>
+                    </div>
+                  </div>
+                </div>
+                <div className="cycle-pill cycle-pill-end" title="Domain"><Zap size={13} /><div><div className="cycle-pill-label">Domain</div><div className="cycle-pill-value">zentaapqr.com</div></div></div>
+              </div>
+              <div className="qr-grid" data-testid="qr-grid">
+                {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
+                  <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
+                    <QRCodeSVG
+                      value={`${QR_DOMAIN}/customer?table=${n}`}
+                      size={84}
+                      bgColor="#ffffff"
+                      fgColor="#161310"
+                      level="M"
+                      includeMargin={false}
+                    />
+                    <div className="qr-tile-label">Table {n}</div>
+                  </div>
+                ))}
+                {tables > 12 && (
+                  <div className="qr-tile qr-tile-more" data-testid="qr-tile-more">
+                    <div className="qr-more-num">+{tables - 12}</div>
+                    <div className="qr-tile-label">more</div>
+                  </div>
+                )}
+              </div>
+              <div style={{ marginTop: 14, fontSize: 12, color: "var(--muted)" }}>
+                Once subscribed, download / print these from <b>Manager Dashboard → Tables → "Download QR codes"</b>.
+              </div>
+            </div>
+
+            {/* Autopay status pill */}
+            {hasActive && (
+              <div className="autopay-card" data-testid="autopay-card">
+                <Repeat size={18} color={existing.autopay_enabled ? "var(--green)" : "var(--muted)"} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>
+                    Autopay {existing.autopay_enabled ? "is ON" : "is OFF"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                    {existing.autopay_enabled
+                      ? `Your next charge of ${fmtRupee(existing.total)} is automatic on ${fmtDate(existing.next_cycle_start)}. You can cancel anytime.`
+                      : "Complete your first payment to enable autopay. After that, future cycles are auto-charged on your saved method."}
+                  </div>
+                </div>
+                <span className={`autopay-state ${existing.autopay_enabled ? "on" : "off"}`} data-testid="autopay-state">
+                  {existing.autopay_enabled ? "ON" : "OFF"}
+                </span>
+              </div>
+            )}
+
+
             {/* Formula */}
             <div className="formula-box" data-testid="formula-box">
               <div className="formula-title">HOW THE PRICE IS CALCULATED</div>
@@ -312,7 +435,7 @@ export default function Subscribe() {
         {tab === "break" && pricing && (
           <div className="breakdown" data-testid="breakdown-box">
             <div className="bk-header">
-              <span>MONTHLY INVOICE — TABLETAAP</span>
+              <span>MONTHLY INVOICE — ZENTAAP</span>
               <span>{monthLabel}</span>
             </div>
             <div className="bk-row">

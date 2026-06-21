@@ -91,7 +91,7 @@ export default function Kitchen() {
             <ArrowLeft size={16} /> Login
           </Link>
           <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" style={{ height: 30 }} />
+            <img src="/logo.png" alt="ZenTaap" style={{ height: 30 }} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--gold)", fontWeight: 700 }}>
             <ChefHat size={20} /> Kitchen Display

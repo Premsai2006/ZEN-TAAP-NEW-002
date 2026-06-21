@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ShoppingCart, Plus, Minus, X, Eye, EyeOff, Lock } from "lucide-react";
@@ -33,7 +33,7 @@ function CustomerPinGate({ onUnlock }) {
       <form className="pin-gate-card" onSubmit={submit}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
           <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" style={{ height: 42 }} />
+            <img src="/logo.png" alt="ZenTaap" style={{ height: 42 }} />
           </div>
         </div>
         <div
@@ -132,8 +132,7 @@ function CustomerPinGate({ onUnlock }) {
   );
 }
 
-function CartDrawer({ cart, setCart, onClose, onPlaceOrder, placing }) {
-  const [tableNum, setTableNum] = useState("");
+function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing }) {
   const total = cart.reduce((sum, l) => sum + l.qty * l.price, 0);
 
   const updateQty = (id, delta) => {
@@ -147,18 +146,17 @@ function CartDrawer({ cart, setCart, onClose, onPlaceOrder, placing }) {
   const removeLine = (id) => setCart((c) => c.filter((l) => l.id !== id));
 
   const handlePlace = () => {
-    const n = parseInt(tableNum, 10);
-    if (!n || n < 1) return toast.error("Enter a valid table number");
     if (cart.length === 0) return toast.error("Your cart is empty");
-    onPlaceOrder(n);
+    onPlaceOrder(tableLocked);
   };
 
   return (
     <div className="cart-overlay" onClick={onClose} data-testid="cart-overlay">
       <div className="cart-drawer" onClick={(e) => e.stopPropagation()} data-testid="cart-drawer">
         <div className="cart-header">
-          <div className="font-serif" style={{ fontSize: 20 }}>
-            Your Cart
+          <div className="cart-table-pill" data-testid="cart-table-pill">
+            <span className="cart-table-dot" />
+            {tableLocked ? `Table ${tableLocked}` : "Walk-in / Counter"}
           </div>
           <button
             onClick={onClose}
@@ -204,17 +202,6 @@ function CartDrawer({ cart, setCart, onClose, onPlaceOrder, placing }) {
 
         {cart.length > 0 && (
           <div className="cart-footer">
-            <div className="form-group" style={{ marginBottom: 12 }}>
-              <label className="form-label">Table Number</label>
-              <input
-                type="number"
-                min={1}
-                placeholder="e.g. 5"
-                value={tableNum}
-                onChange={(e) => setTableNum(e.target.value)}
-                data-testid="cart-table-input"
-              />
-            </div>
             <div className="cart-total-row">
               <span>Total</span>
               <span className="total-amt" data-testid="cart-total">₹{total}</span>
@@ -236,6 +223,40 @@ function CartDrawer({ cart, setCart, onClose, onPlaceOrder, placing }) {
   );
 }
 
+function OrderSuccessOverlay({ tableNum, orderNumber, onDone }) {
+  // Auto-dismiss after a short celebration
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200);
+    return () => clearTimeout(t);
+  }, [onDone]);
+  return (
+    <div className="order-success-overlay" data-testid="order-success-overlay" onClick={onDone}>
+      <div className="order-success-card" onClick={(e) => e.stopPropagation()}>
+        <div className="confetti">
+          {Array.from({ length: 18 }).map((_, i) => (
+            <span key={i} className={`confetti-piece p${i % 6}`} style={{ left: `${(i * 5.5) % 100}%`, animationDelay: `${(i * 60) % 800}ms` }} />
+          ))}
+        </div>
+        <div className="success-tick" aria-hidden="true">
+          <svg viewBox="0 0 52 52" width="80" height="80">
+            <circle className="tick-circle" cx="26" cy="26" r="24" fill="none" stroke="var(--gold)" strokeWidth="2.5" />
+            <path className="tick-check" fill="none" stroke="var(--gold)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" d="M14 27 l8 8 l16 -18" />
+          </svg>
+        </div>
+        <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, color: "var(--gold)" }}>
+          Order Placed!
+        </div>
+        <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 4 }}>
+          {tableNum ? `Sit tight at Table ${tableNum} — kitchen is on it.` : "Sit tight — kitchen is on it."}
+        </div>
+        {orderNumber && (
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>Order ID · #{orderNumber}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Customer() {
   const [authed, setAuthed] = useState(!!localStorage.getItem(CUSTOMER_TOKEN_KEY));
   const [menu, setMenu] = useState([]);
@@ -244,6 +265,18 @@ export default function Customer() {
   const [cart, setCart] = useState([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [placing, setPlacing] = useState(false);
+  const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber }
+
+  // Lock the table number from URL (?table=N). When missing/invalid -> null (walk-in).
+  const tableFromUrl = useMemo(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const n = parseInt(sp.get("table") || "", 10);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const refresh = async () => {
     try {
@@ -252,7 +285,6 @@ export default function Customer() {
       setCategories(c.data);
     } catch (err) {
       // 2s poll — don't toast on every failure, but log so devs catch network issues.
-      // eslint-disable-next-line no-console
       console.warn("Customer.refresh failed:", err?.response?.status, err?.message);
     }
   };
@@ -295,8 +327,8 @@ export default function Customer() {
     try {
       const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price }));
       const amount = cart.reduce((s, l) => s + l.qty * l.price, 0);
-      await api.post("/orders", { table: tableN, items, amount });
-      toast.success(`Order placed for Table ${tableN}!`);
+      const { data } = await api.post("/orders", { table: tableN || 0, items, amount });
+      setSuccessInfo({ tableNum: tableN || null, orderNumber: data?.order_number || null });
       setCart([]);
       setDrawerOpen(false);
     } catch (err) {
@@ -311,11 +343,22 @@ export default function Customer() {
       <div className="topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 32 }} />
+            <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 32 }} />
           </div>
         </div>
-        <div className="live-pill">
-          <div className="live-dot-g" /> Live menu
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {tableFromUrl ? (
+            <div className="table-badge" data-testid="customer-table-badge">
+              <Lock size={11} /> Table {tableFromUrl}
+            </div>
+          ) : (
+            <div className="table-badge walk-in" data-testid="customer-table-badge">
+              Walk-in
+            </div>
+          )}
+          <div className="live-pill">
+            <div className="live-dot-g" /> Live menu
+          </div>
         </div>
       </div>
 
@@ -421,9 +464,18 @@ export default function Customer() {
         <CartDrawer
           cart={cart}
           setCart={setCart}
+          tableLocked={tableFromUrl}
           onClose={() => setDrawerOpen(false)}
           onPlaceOrder={placeOrder}
           placing={placing}
+        />
+      )}
+
+      {successInfo && (
+        <OrderSuccessOverlay
+          tableNum={successInfo.tableNum}
+          orderNumber={successInfo.orderNumber}
+          onDone={() => setSuccessInfo(null)}
         />
       )}
 

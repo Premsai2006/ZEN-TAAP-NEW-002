@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -70,7 +70,7 @@ class MenuItemUpdate(BaseModel):
 
 
 class RestaurantSettings(BaseModel):
-    restaurant_name: str = "TableTaap Restaurant"
+    restaurant_name: str = "ZenTaap Restaurant"
     logo_url: str = ""
     gst_number: str = ""
     gst_rate: Optional[float] = None
@@ -529,6 +529,16 @@ async def pricing(tables: int = 14):
 @api_router.get("/subscription")
 async def get_subscription():
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    cycle_start = doc.get("cycle_start")
+    next_cycle = doc.get("next_cycle_start")
+    # cycle_end = last day of the current cycle (1 day before the next cycle start)
+    cycle_end = None
+    if next_cycle:
+        try:
+            d = datetime.fromisoformat(next_cycle.replace("Z", "+00:00")) - timedelta(days=1)
+            cycle_end = d.isoformat()
+        except Exception:
+            cycle_end = next_cycle
     return {
         "tables": doc.get("subscription_tables"),
         "subtotal": doc.get("subscription_subtotal"),
@@ -542,8 +552,15 @@ async def get_subscription():
         "pending_tables": doc.get("pending_tables"),
         "pending_subtotal": doc.get("pending_subtotal"),
         "pending_total": doc.get("pending_total"),
-        "cycle_start": doc.get("cycle_start"),
-        "next_cycle_start": doc.get("next_cycle_start"),
+        "cycle_start": cycle_start,
+        "next_cycle_start": next_cycle,
+        "cycle_end": cycle_end,
+        # Razorpay / autopay state
+        "autopay_enabled": bool(doc.get("autopay_enabled", False)),
+        "razorpay_customer_id": doc.get("razorpay_customer_id"),
+        "razorpay_subscription_id": doc.get("razorpay_subscription_id"),
+        "last_payment_id": doc.get("last_payment_id"),
+        "last_payment_at": doc.get("last_payment_at"),
     }
 
 
@@ -634,6 +651,150 @@ async def create_subscription(body: SubscribeBody):
         "cycle_start": cycle_start_iso,
         "next_cycle_start": next_cycle_iso,
     }
+
+
+# ---------- Razorpay payments + autopay ----------
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "https://razorpay.me/@prem9300")
+
+
+def _razorpay_client():
+    if not (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET):
+        return None
+    try:
+        import razorpay
+        return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    except Exception as e:
+        logger.warning("Razorpay client init failed: %s", e)
+        return None
+
+
+class RazorpayOrderBody(BaseModel):
+    tables: int
+
+
+class VerifyPaymentBody(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: Optional[str] = None
+    enable_autopay: bool = True
+
+
+@api_router.get("/payments/config")
+async def payments_config():
+    """Returns the public Razorpay key_id (safe to expose) and a fallback redirect link.
+    The secret stays server-side. If no keys are configured, frontend should use the
+    payment-link fallback (razorpay.me) — paid demo mode."""
+    return {
+        "key_id": RAZORPAY_KEY_ID or "",
+        "configured": bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET),
+        "fallback_link": RAZORPAY_PAYMENT_LINK,
+    }
+
+
+@api_router.post("/payments/create-order")
+async def create_razorpay_order(body: RazorpayOrderBody):
+    """Creates a Razorpay Order for the subscription amount (in paise).
+    If keys aren't configured, returns a fallback_link so frontend can redirect to razorpay.me."""
+    price = _compute_price(body.tables)
+    amount_paise = int(round(price["total_with_tax"] * 100))
+    client = _razorpay_client()
+    if not client:
+        # Demo / unconfigured — return fallback link the FE will redirect to.
+        return {
+            "configured": False,
+            "fallback_link": RAZORPAY_PAYMENT_LINK,
+            "amount": amount_paise,
+            "currency": "INR",
+            "note": "Razorpay API keys not configured — using public payment-page redirect (no autopay).",
+        }
+    receipt = f"zentaap_{uuid.uuid4().hex[:16]}"[:40]
+    order = client.order.create(
+        {"amount": amount_paise, "currency": "INR", "payment_capture": 1, "receipt": receipt}
+    )
+    return {
+        "configured": True,
+        "key_id": RAZORPAY_KEY_ID,
+        "order_id": order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "receipt": receipt,
+    }
+
+
+@api_router.post("/payments/verify")
+async def verify_razorpay_payment(body: VerifyPaymentBody):
+    """Verifies a successful Razorpay payment, marks subscription active, enables autopay.
+    Signature verification only runs when secrets are configured."""
+    client = _razorpay_client()
+    if client and body.razorpay_signature:
+        try:
+            client.utility.verify_payment_signature({
+                "razorpay_order_id": body.razorpay_order_id,
+                "razorpay_payment_id": body.razorpay_payment_id,
+                "razorpay_signature": body.razorpay_signature,
+            })
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Signature verification failed: {e}")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update = {
+        "subscription_status": "active",
+        "last_payment_id": body.razorpay_payment_id,
+        "last_payment_order_id": body.razorpay_order_id,
+        "last_payment_at": now_iso,
+        # Autopay: once the first payment is captured, subsequent cycles are auto-charged.
+        "autopay_enabled": bool(body.enable_autopay),
+    }
+    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+    return {
+        "success": True,
+        "status": "active",
+        "autopay_enabled": update["autopay_enabled"],
+        "payment_id": body.razorpay_payment_id,
+    }
+
+
+@api_router.put("/subscription/autopay")
+async def toggle_autopay(body: dict):
+    """Manager toggles autopay on/off (only meaningful after first successful payment)."""
+    enable = bool(body.get("enabled", False))
+    await db.settings.update_one({"key": "restaurant"}, {"$set": {"autopay_enabled": enable}})
+    return {"success": True, "autopay_enabled": enable}
+
+
+@api_router.post("/payments/webhook")
+async def razorpay_webhook(request: Request):
+    """Receives Razorpay payment.captured / subscription.charged events.
+    Signature verification only when RAZORPAY_WEBHOOK_SECRET is set."""
+    payload = await request.body()
+    sig = request.headers.get("X-Razorpay-Signature", "")
+    client = _razorpay_client()
+    if client and RAZORPAY_WEBHOOK_SECRET and sig:
+        try:
+            client.utility.verify_webhook_signature(payload.decode(), sig, RAZORPAY_WEBHOOK_SECRET)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Webhook signature invalid: {e}")
+    try:
+        import json as _json
+        data = _json.loads(payload.decode() or "{}")
+    except Exception:
+        data = {}
+    event = data.get("event", "")
+    if event in ("payment.captured", "subscription.charged"):
+        pid = ((data.get("payload") or {}).get("payment") or {}).get("entity", {}).get("id")
+        await db.settings.update_one(
+            {"key": "restaurant"},
+            {"$set": {
+                "subscription_status": "active",
+                "last_payment_id": pid,
+                "last_payment_at": datetime.now(timezone.utc).isoformat(),
+                "autopay_enabled": True,
+            }},
+        )
+    return {"received": True, "event": event}
 
 
 @api_router.post("/menu", response_model=MenuItem)
@@ -927,7 +1088,7 @@ async def seed():
 
 @api_router.get("/")
 async def root():
-    return {"message": "TableTap Manager API"}
+    return {"message": "ZenTaap Manager API"}
 
 
 app.include_router(api_router)

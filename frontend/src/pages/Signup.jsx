@@ -107,7 +107,7 @@ export default function Signup() {
       <form className="login-card wide" onSubmit={submit} data-testid="signup-form">
         <div style={{ textAlign: "center", marginBottom: 14 }}>
           <div className="brand-logo-wrap" data-testid="signup-brand">
-            <img src="/logo.png" alt="TableTaap" style={{ height: 50, display: "block" }} />
+            <img src="/logo.png" alt="ZenTaap" style={{ height: 50, display: "block" }} />
           </div>
         </div>
         <div className="font-serif" style={{ fontSize: 24, marginBottom: 6, textAlign: "center" }}>
@@ -154,7 +154,7 @@ export default function Signup() {
             type="text"
             value={form.restaurant_name}
             onChange={(e) => set("restaurant_name", e.target.value)}
-            placeholder="e.g. TableTaap Bistro"
+            placeholder="e.g. ZenTaap Bistro"
             data-testid="signup-restaurant-name"
           />
         </div>

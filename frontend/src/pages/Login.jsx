@@ -50,7 +50,7 @@ export default function Login() {
       <form className="login-card" onSubmit={submit} data-testid="login-form">
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div className="brand-logo-wrap" style={{ display: "inline-block" }}>
-            <img src="/logo.png" alt="TableTaap" className="brand-logo" style={{ height: 56 }} />
+            <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 56 }} />
           </div>
         </div>
         <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, textAlign: "center" }}>
@@ -132,7 +132,7 @@ export default function Login() {
 
         {/* Create Account — bold and prominent (no highlight box) */}
         <div style={{ textAlign: "center", marginTop: 28 }}>
-          <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>New to TableTaap?</div>
+          <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>New to ZenTaap?</div>
           <a
             href="/signup"
             style={{

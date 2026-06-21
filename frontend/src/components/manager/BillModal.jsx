@@ -23,7 +23,7 @@ export default function BillModal({ order, settings, onClose }) {
 
   const buildWhatsAppMessage = () => {
     const lines = [];
-    lines.push(`*${s.restaurant_name || "TableTaap Restaurant"}*`);
+    lines.push(`*${s.restaurant_name || "ZenTaap Restaurant"}*`);
     if (s.address) lines.push(s.address);
     if (s.phone) lines.push(`Ph: ${s.phone}`);
     if (s.gst_number) lines.push(`GSTIN: ${s.gst_number}`);
@@ -124,7 +124,7 @@ export default function BillModal({ order, settings, onClose }) {
             </div>
           )}
           <div className="b-center" style={{ textAlign: "center", fontWeight: 700, fontSize: 16 }}>
-            {s.restaurant_name || "TableTaap Restaurant"}
+            {s.restaurant_name || "ZenTaap Restaurant"}
           </div>
           {s.address && (
             <div className="b-center" style={{ textAlign: "center", fontSize: 11 }}>

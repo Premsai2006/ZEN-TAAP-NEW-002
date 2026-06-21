@@ -217,7 +217,7 @@ export default function SettingsSection({ settings, onRefresh }) {
               type="text"
               value={form.restaurant_name}
               onChange={(e) => set("restaurant_name", e.target.value)}
-              placeholder="TableTaap Restaurant"
+              placeholder="ZenTaap Restaurant"
               data-testid="settings-name-input"
             />
           </div>

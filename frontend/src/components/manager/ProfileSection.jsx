@@ -157,11 +157,11 @@ export default function ProfileSection({ onRefresh }) {
               </div>
               <div>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  {sub.status === "trial" ? "Trial Ends" : "Next Cycle"}
+                  {sub.status === "trial" ? "Trial Ends" : "Ends on"}
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 500 }} data-testid="profile-sub-next">
                   <Calendar size={12} style={{ display: "inline", marginRight: 5, verticalAlign: "middle" }} />
-                  {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.next_cycle_start)}
+                  {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.cycle_end || sub.next_cycle_start)}
                 </div>
               </div>
             </div>
@@ -188,9 +188,9 @@ export default function ProfileSection({ onRefresh }) {
               <div className="cycle-pill cycle-pill-end" data-testid="profile-sub-ends-pill">
                 <Calendar size={13} />
                 <div>
-                  <div className="cycle-pill-label">{sub.status === "trial" ? "Trial ends" : "Renews on"}</div>
+                  <div className="cycle-pill-label">{sub.status === "trial" ? "Trial ends" : "Ends on"}</div>
                   <div className="cycle-pill-value" data-testid="profile-sub-ends">
-                    {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.next_cycle_start)}
+                    {sub.status === "trial" ? fmtDate(sub.trial_end) : fmtDate(sub.cycle_end || sub.next_cycle_start)}
                   </div>
                 </div>
               </div>
