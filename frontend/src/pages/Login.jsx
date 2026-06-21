@@ -34,9 +34,29 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { data } = await api.post("/auth/login", { pin });
+      // Stable device_id so the same browser keeps the same session slot across logins.
+      let deviceId = localStorage.getItem("mgr_device_id");
+      if (!deviceId) {
+        deviceId = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 16);
+        localStorage.setItem("mgr_device_id", deviceId);
+      }
+      // Friendly device label
+      let label = "Browser";
+      try {
+        const ua = navigator.userAgent || "";
+        const browser = /Edg/.test(ua) ? "Edge" : /Chrome/.test(ua) ? "Chrome" : /Firefox/.test(ua) ? "Firefox" : /Safari/.test(ua) ? "Safari" : "Browser";
+        const os = /Windows/.test(ua) ? "Windows" : /Mac/.test(ua) ? "macOS" : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS" : /Linux/.test(ua) ? "Linux" : "";
+        label = os ? `${browser} on ${os}` : browser;
+      } catch {
+        /* default */
+      }
+      const { data } = await api.post("/auth/login", { pin, device_id: deviceId, device_label: label });
       localStorage.setItem("mgr_token", data.token);
-      toast.success("Welcome back");
+      if (data.active_devices >= data.max_devices) {
+        toast.success(`Welcome back · ${data.active_devices}/${data.max_devices} devices used`);
+      } else {
+        toast.success("Welcome back");
+      }
       navigate("/manager");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Login failed");

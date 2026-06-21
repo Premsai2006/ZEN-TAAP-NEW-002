@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight } from "lucide-react";
+import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight, Menu, X, CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
@@ -86,10 +86,43 @@ export default function Manager() {
   };
 
   const activeNav = NAV.find((n) => n.key === active);
+  const hasAccess = !subscription || subscription.has_access !== false;
+  const allowedSectionsWhenLocked = new Set(["profile", "settings"]);
+
+  // Force-redirect to /subscribe if subscription has been actively cancelled/expired
+  // (only when backend returned status='expired'; first-time visitors stay on Explore Mode).
+  useEffect(() => {
+    if (subscription?.status === "expired" && !["profile", "settings"].includes(active)) {
+      navigate("/subscribe", { replace: true });
+    }
+  }, [subscription?.status, active, navigate]);
+
+  // If user picks a gated section while locked, bounce them to /subscribe.
+  useEffect(() => {
+    if (!hasAccess && !allowedSectionsWhenLocked.has(active)) {
+      setActive("profile");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAccess]);
+
+  const [mobileNav, setMobileNav] = useState(false);
+  const isLocked = !hasAccess;
 
   return (
-    <div className="layout" data-testid="manager-dashboard">
-      <aside className="sidebar">
+    <div className={`layout ${mobileNav ? "mobile-nav-open" : ""}`} data-testid="manager-dashboard">
+      {/* Mobile menu toggle (visible on small screens) */}
+      <button
+        type="button"
+        className="mobile-nav-toggle"
+        onClick={() => setMobileNav((v) => !v)}
+        aria-label="Toggle navigation"
+        data-testid="mobile-nav-toggle"
+      >
+        {mobileNav ? <X size={18} /> : <Menu size={18} />}
+      </button>
+      {mobileNav && <div className="mobile-nav-backdrop" onClick={() => setMobileNav(false)} />}
+
+      <aside className="sidebar" data-testid="sidebar">
         <div style={{ marginBottom: 22, padding: "4px 8px" }}>
           <div className="brand-logo-wrap">
             <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 30 }} />
@@ -98,18 +131,38 @@ export default function Manager() {
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV.map((n) => {
             const Icon = n.icon;
+            const locked = isLocked && !allowedSectionsWhenLocked.has(n.key);
             return (
               <div
                 key={n.key}
-                className={`nav-link ${active === n.key ? "active" : ""}`}
-                onClick={() => setActive(n.key)}
+                className={`nav-link ${active === n.key ? "active" : ""} ${locked ? "locked" : ""}`}
+                onClick={() => {
+                  if (locked) {
+                    navigate("/subscribe");
+                    return;
+                  }
+                  setActive(n.key);
+                  setMobileNav(false);
+                }}
                 data-testid={`nav-${n.key}`}
+                title={locked ? "Subscribe to unlock this section" : undefined}
               >
                 <Icon size={16} className="icon" />
                 <span>{n.label}</span>
+                {locked && <Lock size={11} style={{ marginLeft: "auto", color: "var(--muted)" }} />}
               </div>
             );
           })}
+          {/* Subscribe link — always available */}
+          <div
+            className="nav-link"
+            onClick={() => { navigate("/subscribe"); setMobileNav(false); }}
+            data-testid="nav-subscribe"
+            style={{ marginTop: 6, color: "var(--gold)" }}
+          >
+            <CreditCard size={16} className="icon" />
+            <span>Subscription</span>
+          </div>
         </nav>
 
         <div
@@ -136,13 +189,23 @@ export default function Manager() {
           </div>
         </div>
 
-        {/* Explore Mode banner — shown when no active subscription. Manager can VIEW but not USE features. */}
+        {/* Lock banner — shown when subscription is not active (none/skipped/expired). */}
         {subscription && !["trial", "active"].includes(subscription.status) && (
           <div className="explore-banner" data-testid="explore-mode-banner">
             <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, minWidth: 220 }}>
               <Lock size={18} color="var(--gold)" />
               <div className="explore-banner-text">
-                <b>Explore Mode</b> — You&apos;re browsing ZenTaap without an active subscription. Start your 4-day free trial to place orders, generate bills and unlock all features.
+                {subscription.status === "expired" ? (
+                  <>
+                    <b>Subscription expired</b> — Your last cycle ended on{" "}
+                    <b>{subscription.cycle_end ? new Date(subscription.cycle_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</b>.
+                    Pay now to restore full access. Orders, billing and analytics are paused.
+                  </>
+                ) : (
+                  <>
+                    <b>Subscribe to unlock</b> — Start your <b>4-day free trial</b> to use Live Orders, billing, analytics &amp; QR codes. You can still view your Profile and change Settings while locked.
+                  </>
+                )}
               </div>
             </div>
             <button
@@ -151,7 +214,7 @@ export default function Manager() {
               onClick={() => navigate("/subscribe")}
               data-testid="explore-subscribe-btn"
             >
-              Start Free Trial <ArrowRight size={14} />
+              {subscription.status === "expired" ? "Pay & Resume" : "Start Free Trial"} <ArrowRight size={14} />
             </button>
           </div>
         )}

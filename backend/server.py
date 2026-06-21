@@ -151,6 +151,8 @@ class OrderUpdate(BaseModel):
 
 class LoginRequest(BaseModel):
     pin: str
+    device_id: Optional[str] = None
+    device_label: Optional[str] = None
 
 
 class SignupRequest(BaseModel):
@@ -238,6 +240,46 @@ async def signup(req: SignupRequest):
     return {"success": True, "token": f"mgr-{uuid.uuid4()}"}
 
 
+MAX_DEVICES = 2
+
+
+async def _register_session(device_id: Optional[str], device_label: Optional[str]) -> dict:
+    """Register a manager device session. Enforces a 2-device cap by evicting the
+    least-recently-used session when a new third device tries to log in."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    token = f"mgr-{uuid.uuid4()}"
+    if not device_id:
+        device_id = uuid.uuid4().hex[:16]
+    label = (device_label or "Unknown device")[:80]
+
+    # Update-or-insert this device's session.
+    existing = await db.sessions.find_one({"device_id": device_id})
+    if existing:
+        await db.sessions.update_one(
+            {"device_id": device_id},
+            {"$set": {"token": token, "last_used": now_iso, "device_label": label}},
+        )
+    else:
+        # Count current active sessions for the manager; evict oldest if at cap.
+        sessions = await db.sessions.find({"scope": "manager"}, {"_id": 0}).to_list(50)
+        if len(sessions) >= MAX_DEVICES:
+            # Find least-recently-used by last_used (or created_at), evict it.
+            sessions.sort(key=lambda s: s.get("last_used") or s.get("created_at") or "")
+            oldest = sessions[0]
+            await db.sessions.delete_one({"device_id": oldest["device_id"]})
+        await db.sessions.insert_one({
+            "scope": "manager",
+            "device_id": device_id,
+            "device_label": label,
+            "token": token,
+            "created_at": now_iso,
+            "last_used": now_iso,
+        })
+
+    active = await db.sessions.count_documents({"scope": "manager"})
+    return {"token": token, "device_id": device_id, "active_devices": active}
+
+
 @api_router.post("/auth/login")
 async def login(req: LoginRequest):
     _validate_pin(req.pin)
@@ -251,7 +293,29 @@ async def login(req: LoginRequest):
         raise HTTPException(status_code=404, detail="No manager registered. Please sign up first.")
     if req.pin != stored:
         raise HTTPException(status_code=401, detail="Incorrect PIN")
-    return {"success": True, "token": f"mgr-{uuid.uuid4()}"}
+    sess = await _register_session(req.device_id, req.device_label)
+    return {
+        "success": True,
+        "token": sess["token"],
+        "device_id": sess["device_id"],
+        "active_devices": sess["active_devices"],
+        "max_devices": MAX_DEVICES,
+    }
+
+
+@api_router.get("/auth/sessions")
+async def list_sessions():
+    docs = await db.sessions.find({"scope": "manager"}, {"_id": 0, "token": 0}).to_list(50)
+    docs.sort(key=lambda s: s.get("last_used") or s.get("created_at") or "", reverse=True)
+    return {"sessions": docs, "max_devices": MAX_DEVICES, "active": len(docs)}
+
+
+@api_router.delete("/auth/sessions/{device_id}")
+async def revoke_session(device_id: str):
+    r = await db.sessions.delete_one({"scope": "manager", "device_id": device_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"success": True}
 
 
 @api_router.post("/auth/change-pin")
@@ -539,12 +603,38 @@ async def get_subscription():
             cycle_end = d.isoformat()
         except Exception:
             cycle_end = next_cycle
+
+    status = doc.get("subscription_status", "none")
+    # Auto-expire: if the current cycle has ended AND no successful renewal payment
+    # has come through, downgrade status to 'expired' so the frontend can lock access.
+    if next_cycle and status in ("active", "trial"):
+        try:
+            next_dt = datetime.fromisoformat(next_cycle.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            last_paid = doc.get("last_payment_at")
+            last_paid_dt = None
+            if last_paid:
+                try:
+                    last_paid_dt = datetime.fromisoformat(last_paid.replace("Z", "+00:00"))
+                except Exception:
+                    last_paid_dt = None
+            # Grace passed: now is at/after next_cycle and either no payment yet OR payment was for the previous cycle
+            if now >= next_dt and (last_paid_dt is None or last_paid_dt < (next_dt - timedelta(days=1))):
+                status = "expired"
+                await db.settings.update_one(
+                    {"key": "restaurant"}, {"$set": {"subscription_status": "expired"}}
+                )
+        except Exception:
+            pass
+
+    has_access = status in ("trial", "active")
     return {
         "tables": doc.get("subscription_tables"),
         "subtotal": doc.get("subscription_subtotal"),
         "gst": doc.get("subscription_gst"),
         "total": doc.get("subscription_total"),
-        "status": doc.get("subscription_status", "none"),
+        "status": status,
+        "has_access": has_access,
         "trial_start": doc.get("trial_start"),
         "trial_end": doc.get("trial_end"),
         "payment_method": doc.get("payment_method"),

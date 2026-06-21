@@ -1,3 +1,133 @@
+/* === iter-10 :: Mobile responsive + 2-device + locked nav === */
+
+/* Locked nav-link visual */
+.nav-link.locked {
+  opacity: 0.55;
+  cursor: pointer;
+}
+.nav-link.locked:hover { opacity: 1; background: rgba(232,125,47,0.08); }
+
+/* Mobile sidebar drawer */
+.mobile-nav-toggle {
+  display: none;
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 102;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+}
+.mobile-nav-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 99;
+}
+
+@media (max-width: 900px) {
+  .mobile-nav-toggle { display: inline-flex; }
+  .layout > .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    z-index: 101;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease-out;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .layout.mobile-nav-open > .sidebar { transform: translateX(0); }
+  .layout.mobile-nav-open .mobile-nav-backdrop { display: block; }
+  .main { padding-left: 14px; padding-right: 14px; padding-top: 60px; }
+  .topbar { flex-wrap: wrap; gap: 10px; }
+  .topbar-right { gap: 10px; flex-wrap: wrap; }
+  .topbar-right .live-pill { font-size: 11px; padding: 4px 10px; }
+
+  /* Stats / KPI cards stack 2-up on mobile */
+  .kpi-grid, .stats-row, .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+  .add-item-card { padding: 16px !important; }
+  .form-row { grid-template-columns: 1fr !important; }
+  .menu-mgmt-grid, .menu-grid { grid-template-columns: 1fr; }
+  .menu-item-card { flex-direction: row; align-items: center; }
+  .menu-item-left { gap: 10px; }
+  .menu-emoji { width: 44px; height: 44px; }
+  .tables-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .ticket-grid { grid-template-columns: 1fr !important; }
+  .kitchen-stats { grid-template-columns: repeat(2, 1fr) !important; }
+  .qr-grid, .tables-qr-grid { grid-template-columns: repeat(2, 1fr); }
+  .payment-grid { grid-template-columns: 1fr 1fr !important; }
+  .role-card { padding: 12px; }
+  .role-card-title { font-size: 13px; }
+  .role-card-sub { font-size: 10px; }
+  .page-title { font-size: 18px !important; }
+  .cycle-pill { padding: 6px 12px; font-size: 11px; }
+
+  /* Sales section adapts */
+  .sales-grid, .sales-row { grid-template-columns: 1fr !important; }
+
+  /* Login + Signup cards reduce padding */
+  .login-card { padding: 24px 18px !important; max-width: 96vw !important; }
+
+  /* Kitchen page */
+  .kitchen-shell { padding: 14px; }
+  .kitchen-topbar { flex-direction: column; align-items: stretch; gap: 10px; }
+
+  /* Subscribe page */
+  .sub-shell { padding-top: 60px; }
+}
+
+@media (max-width: 480px) {
+  .tables-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .kitchen-stats { grid-template-columns: 1fr !important; }
+  .qr-grid, .tables-qr-grid { grid-template-columns: repeat(2, 1fr); }
+  .payment-grid { grid-template-columns: 1fr !important; }
+  .filter-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 6px; }
+  .filter-tab { white-space: nowrap; }
+}
+
+/* Sessions list table (Settings → Devices) */
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.session-row .label { flex: 1; }
+.session-row .meta { color: var(--muted); font-size: 11px; }
+.session-row.this-device { border-color: var(--gold); background: rgba(232,125,47,0.08); }
+
+/* === iter-10 :: payment method category logos === */
+.payment-card-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+  height: 44px;
+  align-items: center;
+}
+.payment-card-logo svg {
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+
 /* === ZenTaap iter-9 :: QR + autopay === */
 
 /* Subscribe page QR preview card */
@@ -232,15 +362,18 @@ body {
 .brand-logo { height: 36px; display: block; }
 .brand-logo-wrap {
   background: #ffffff;
-  padding: 8px 16px;
-  border-radius: 10px;
-  display: inline-block;
+  padding: 8px 18px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 0;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  border: 2px solid var(--gold);
+  box-shadow: 0 4px 14px rgba(232,125,47,0.18);
 }
 [data-theme="light"] .brand-logo-wrap {
   background: #ffffff;
-  border: 1px solid var(--line);
+  border: 2px solid var(--gold);
 }
 
 /* Layout */

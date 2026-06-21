@@ -2,8 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Zap, Repeat } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Printer } from "lucide-react";
 import { api } from "@/lib/api";
+import { UPILogo, CardLogo, BankLogo, WalletLogo } from "@/components/subscribe/PaymentLogos";
+
+const METHOD_LOGOS = { upi: UPILogo, card: CardLogo, netbanking: BankLogo, wallet: WalletLogo };
 
 const MIN_T = 10;
 const MAX_T = 60;
@@ -125,6 +128,42 @@ export default function Subscribe() {
       s.onerror = () => resolve(false);
       document.body.appendChild(s);
     });
+
+  const printSubscribeQRs = () => {
+    // Render all N QR codes off-screen into a hidden iframe-like print window.
+    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+    if (!w) return toast.error("Browser blocked the print window");
+    // Build SVG markup for each table using QRCodeSVG renderer.
+    // We render N tiles into the live DOM (off-screen) and serialize them.
+    const cards = Array.from({ length: tables }, (_, i) => i + 1)
+      .map((n) => {
+        const svg = document.querySelector(`[data-qr-svg-sub="${n}"] svg`);
+        const svgMarkup = svg ? svg.outerHTML : "";
+        return `
+          <div class="qrcard">
+            <div class="brand">ZenTaap</div>
+            <div class="qrwrap">${svgMarkup}</div>
+            <div class="t">Table ${n}</div>
+            <div class="d">Scan to order</div>
+          </div>`;
+      })
+      .join("");
+    w.document.write(`<!doctype html><html><head><title>ZenTaap QR Codes</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; padding: 24px; background: #f4f4f4; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .qrcard { background: white; border: 2px solid #e87d2f; border-radius: 14px; padding: 18px; text-align: center; break-inside: avoid; }
+        .brand { font-family: serif; font-size: 22px; color: #e87d2f; margin-bottom: 10px; }
+        .qrwrap svg { width: 160px; height: 160px; }
+        .t { font-size: 18px; font-weight: 700; margin-top: 10px; }
+        .d { font-size: 11px; color: #666; margin-top: 4px; }
+        @media print { body { background: white; } .grid { gap: 12px; } }
+      </style>
+    </head><body><div class="grid">${cards}</div>
+    <script>setTimeout(() => window.print(), 400);</script>
+    </body></html>`);
+    w.document.close();
+  };
 
   const onSubscribe = async () => {
     if (!pricing) return;
@@ -359,11 +398,20 @@ export default function Subscribe() {
                   <div>
                     <div className="font-serif" style={{ fontSize: 18 }}>Your {tables} QR codes</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      One QR per table. Each scans to <code style={{ color: "var(--gold)" }}>{QR_DOMAIN}/customer?table=N</code>
+                      One QR per table. Print, laminate &amp; place on each table.
                     </div>
                   </div>
                 </div>
-                <div className="cycle-pill cycle-pill-end" title="Domain"><Zap size={13} /><div><div className="cycle-pill-label">Domain</div><div className="cycle-pill-value">zentaapqr.com</div></div></div>
+                <button
+                  type="button"
+                  onClick={printSubscribeQRs}
+                  className="mini-btn"
+                  data-testid="subscribe-print-qr-btn"
+                  style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
+                >
+                  <Printer size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  Print QRs
+                </button>
               </div>
               <div className="qr-grid" data-testid="qr-grid">
                 {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
@@ -386,8 +434,19 @@ export default function Subscribe() {
                   </div>
                 )}
               </div>
-              <div style={{ marginTop: 14, fontSize: 12, color: "var(--muted)" }}>
-                Once subscribed, download / print these from <b>Manager Dashboard → Tables → "Download QR codes"</b>.
+              {/* Hidden full-set so the Print button can read every QR even when only 12 are shown. */}
+              <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 1, height: 1, overflow: "hidden" }}>
+                {Array.from({ length: tables }, (_, i) => i + 1).map((n) => (
+                  <div key={`hide-${n}`} data-qr-svg-sub={n}>
+                    <QRCodeSVG
+                      value={`${QR_DOMAIN}/customer?table=${n}`}
+                      size={160}
+                      bgColor="#ffffff"
+                      fgColor="#161310"
+                      level="M"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -467,7 +526,7 @@ export default function Subscribe() {
         </div>
         <div className="payment-grid" data-testid="payment-grid">
           {PAYMENT_METHODS.map((m) => {
-            const Icon = m.icon;
+            const Logo = METHOD_LOGOS[m.key];
             return (
               <button
                 key={m.key}
@@ -481,7 +540,9 @@ export default function Subscribe() {
                     <Check size={12} />
                   </div>
                 )}
-                <Icon size={20} />
+                <div className="payment-card-logo">
+                  {Logo ? <Logo size={32} /> : null}
+                </div>
                 <div className="payment-card-label">{m.label}</div>
                 <div className="payment-card-note">{m.note}</div>
                 {m.brands && (
