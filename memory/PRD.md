@@ -112,6 +112,30 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - Frontend Playwright **14/14 (100%)**: forgot-pin OTP, payment symbols, cycle pills in both places, edit-button highlight, qty stepper + badge, kitchen 4 stats + refresh, live orders 'days ago', default 🍽️, cart-fab on top.
 - No issues. Carry-over code review notes: split server.py into routers; extract CustomerMenuCard; gate `demo_otp` behind env flag for production.
 
+
+## Iteration 9 (2026-06-21) — Full rebrand + Razorpay + QR codes
+- **Rebrand TableTaap → ZenTaap** across backend, frontend, docs, public assets. New logo at `/logo.png` (846 KB ChatGPT-rendered logo). Domain: `zentaapqr.com`.
+- **Subscription end-date redesign**: `cycle_end` returned by GET `/api/subscription` (= `next_cycle_start - 1 day`). UI labels swapped from "Renews on" → "Ends on".
+- **Razorpay integration scaffold**:
+  - Backend endpoints: `GET /api/payments/config`, `POST /api/payments/create-order`, `POST /api/payments/verify`, `POST /api/payments/webhook`, `PUT /api/subscription/autopay`.
+  - Env: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PAYMENT_LINK`. Without keys, `/payments/create-order` returns `fallback_link` (razorpay.me/@prem9300) — frontend opens it in a new tab. With keys set, frontend launches `window.Razorpay` checkout.
+  - **Autopay**: after first successful `payment.verify`, `autopay_enabled=true` on the subscription. Manager can toggle via PUT `/api/subscription/autopay`.
+  - Webhook handler: marks subscription active + autopay on `payment.captured` / `subscription.charged`.
+- **QR codes per table** (= subscription.tables):
+  - Subscribe page: `qr-preview-card` with up to 12 QR tiles + "+N more" overflow; each encodes `https://zentaapqr.com/customer?table=N`.
+  - Manager → Tables: "Show QR codes" toggle reveals downloadable SVG per table; "Print all QRs" opens a print window with branded ZenTaap cards.
+- **Customer cart UX**:
+  - Table number is **read from URL `?table=N`** and **locked** (lock icon badge + "Walk-in" badge when missing).
+  - Cart drawer header replaced "Your Cart" text with a gold "Table N" pill; **table input removed**.
+  - **Order placed animation**: full-screen overlay with animated gold tick (SVG stroke draw), 18 falling confetti pieces, "Order Placed!" headline, "Sit tight at Table N", and Order ID. Auto-dismiss 3.2s.
+- **Manager Tables count** now reads from `subscription.tables` (fallback 15 if no sub).
+- **Razorpay checkout.js** loaded async in `index.html`. New `qrcode.react@4.2.0` dependency.
+
+## Verified Tests (iteration_8.json — iter9)
+- Backend pytest **7/7 (100%)**: payments config, subscription cycle_end, create-order fallback, verify→autopay-on, autopay toggle, webhook payment.captured, walk-in order POST.
+- Frontend Playwright **100%** across 5 screens (Login, Subscribe, Customer cart + order success, Manager Tables QR, Profile pill).
+- No critical/minor issues. Code-review carry-overs: split server.py + Subscribe.jsx + Customer.jsx by feature.
+
 - Frontend Playwright: 10/11 visual checks confirmed (clock, growth triangles, profile subscription card, profile-change-sub-btn → /subscribe, email optional label, sub-change-notice, dynamic CTA, signup brand-logo-wrap white bg).
 - Post-fix: deferred path now backfills `cycle_start`/`next_cycle_start` for legacy subs; verified via curl.
 
