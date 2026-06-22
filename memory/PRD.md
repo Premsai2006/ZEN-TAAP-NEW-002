@@ -158,6 +158,28 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - Timezone config for `/stats/today` day-boundary.
 - Customer-side ordering flow (cart, place order, table-pick).
 - Manager analytics: weekly/monthly revenue trends.
+
+## Iteration 10 — Subscribe UX (mid-iter)
+- Logo wrapped in rectangular gold-bordered white box.
+- Removed "Each scans to https://zentaapqr.com/customer?table=N" copy and the zentaapqr.com pill from QR preview card.
+- 2-device login cap (later raised to 4 in iter-11).
+- Manager dashboard locks Orders/Tables/Menu/Sales when subscription status not in {trial, active}; only Profile + Settings remain accessible. Lock banner copy switches for `expired` status to "Subscription expired · Pay & Resume".
+- Subscribe page gets "Print QRs" button (full N-set via hidden render block).
+- Mobile responsive: hamburger toggle + slide-in sidebar drawer @ <=900px; grid 2-up @ <=480px.
+
+## Iteration 11 (2026-06-22) — FINAL LAUNCH BUILD
+- **Pricing rebased**: `BASE_FEE=0`, `PER_TABLE=79.9` (+ 18% GST). Six tiers verified: 10→₹942.82, 20→₹1885.64, 30→₹2828.46, 40→₹3771.28, 50→₹4714.10, 60→₹5656.92. Out-of-range tables now return 400 from both `/pricing` and `/subscription` (consistent).
+- **MAX_DEVICES = 4** (was 2). Settings card copy updated.
+- **Per-sub-brand mini logos** in `BrandLogos.jsx`: GPay, PhonePe, Paytm, BHIM, VISA, Mastercard, RuPay, HDFC, ICICI, SBI, AXIS, Amazon Pay, Freecharge, MobiKwik. Category SVG logos (UPI/Visa-MC/Bank/Wallet master marks) removed.
+- **Mobile fit polish**: brand-chip shrinks to 20px / 9px on phones; cart-drawer full-width on mobile; live-pill hidden; payment-grid single-column @ <=480px.
+- **Bug fixes**: expired-redirect flash on /manager fixed; SettingsSection devices-card max default updated to 4; copy updated from "3rd device" → "you exceed 4 devices".
+
+## Verified Tests (iteration_10.json — LAUNCH)
+- Backend pytest **25/25 (100%)**.
+- Frontend Playwright **100%** — both desktop (1920×1080) and mobile (390×844). All payment cards, formula box, breakdown, 14 brand chips, devices-card 4-cap confirmed.
+- Only LOW-priority cosmetic issue (devices-card copy) → fixed post-test.
+- Razorpay still in DEMO MODE (no API keys) — `/payments/create-order` returns fallback link to `razorpay.me/@prem9300`.
+
 - Multi-staff roles (kitchen / cashier / owner) with separate PINs.
 
 ## Next Action Items

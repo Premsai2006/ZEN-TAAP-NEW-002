@@ -14,7 +14,7 @@ const fileToDataUrl = (file) =>
 
 function DevicesCard() {
   const [sessions, setSessions] = useState([]);
-  const [max, setMax] = useState(2);
+  const [max, setMax] = useState(4);
   const [loading, setLoading] = useState(false);
   const myDeviceId = typeof window !== "undefined" ? localStorage.getItem("mgr_device_id") : null;
 
@@ -63,7 +63,7 @@ function DevicesCard() {
         Active Devices · {sessions.length}/{max}
       </div>
       <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>
-        ZenTaap allows up to <b>{max} signed-in devices</b>. When a 3rd device tries to log in, the least-recently-used one is automatically signed out.
+        ZenTaap allows up to <b>{max} signed-in devices</b>. When you exceed {max} devices, the least-recently-used one is automatically signed out.
       </div>
       {sessions.length === 0 && (
         <div style={{ color: "var(--muted)", fontSize: 13, padding: 14, textAlign: "center" }}>

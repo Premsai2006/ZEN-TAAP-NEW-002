@@ -587,7 +587,8 @@ class SubscribeBody(BaseModel):
 
 @api_router.get("/pricing")
 async def pricing(tables: int = 14):
-    return _compute_price(max(MIN_TABLES, min(MAX_TABLES, tables)))
+    # Returns 400 for out-of-range tables (same behavior as POST /subscription).
+    return _compute_price(tables)
 
 
 @api_router.get("/subscription")
