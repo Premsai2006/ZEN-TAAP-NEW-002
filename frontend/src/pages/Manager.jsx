@@ -88,25 +88,16 @@ export default function Manager() {
 
   const activeNav = NAV.find((n) => n.key === active);
   const hasAccess = !subscription || subscription.has_access !== false;
-  const allowedSectionsWhenLocked = new Set(["profile", "settings"]);
 
-  // Force-redirect to /subscribe if subscription has been actively cancelled/expired
-  // (only when backend returned status='expired'; first-time visitors stay on Explore Mode).
+  // Force-redirect to /subscribe ONLY if subscription has hard-expired (not just 'none/skipped'):
+  // expired managers must take action; first-time visitors stay in Explore Mode.
   useEffect(() => {
     if (subscription?.status === "expired" && !["profile", "settings"].includes(active)) {
       navigate("/subscribe", { replace: true });
     }
   }, [subscription?.status, active, navigate]);
 
-  // If user picks a gated section while locked, bounce them to /subscribe.
-  useEffect(() => {
-    if (!hasAccess && !allowedSectionsWhenLocked.has(active)) {
-      setActive("profile");
-    }
-  }, [hasAccess, active]);
-
   const [mobileNav, setMobileNav] = useState(false);
-  const isLocked = !hasAccess;
 
   return (
     <div className={`layout ${mobileNav ? "mobile-nav-open" : ""}`} data-testid="manager-dashboard">
@@ -131,25 +122,18 @@ export default function Manager() {
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV.map((n) => {
             const Icon = n.icon;
-            const locked = isLocked && !allowedSectionsWhenLocked.has(n.key);
             return (
               <div
                 key={n.key}
-                className={`nav-link ${active === n.key ? "active" : ""} ${locked ? "locked" : ""}`}
+                className={`nav-link ${active === n.key ? "active" : ""}`}
                 onClick={() => {
-                  if (locked) {
-                    navigate("/subscribe");
-                    return;
-                  }
                   setActive(n.key);
                   setMobileNav(false);
                 }}
                 data-testid={`nav-${n.key}`}
-                title={locked ? "Subscribe to unlock this section" : undefined}
               >
                 <Icon size={16} className="icon" />
                 <span>{n.label}</span>
-                {locked && <Lock size={11} style={{ marginLeft: "auto", color: "var(--muted)" }} />}
               </div>
             );
           })}
@@ -199,11 +183,11 @@ export default function Manager() {
                   <>
                     <b>Subscription expired</b> — Your last cycle ended on{" "}
                     <b>{subscription.cycle_end ? new Date(subscription.cycle_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</b>.
-                    Pay now to restore full access. Orders, billing and analytics are paused.
+                    Pay to resume orders, billing &amp; analytics.
                   </>
                 ) : (
                   <>
-                    <b>Subscribe to unlock</b> — Start your <b>4-day free trial</b> to use Live Orders, billing, analytics &amp; QR codes. You can still view your Profile and change Settings while locked.
+                    <b>Explore Mode</b> — Browse freely, but you&apos;ll need an active subscription to take orders, generate bills &amp; mark tickets. Start your <b>4-day free trial</b> any time.
                   </>
                 )}
               </div>

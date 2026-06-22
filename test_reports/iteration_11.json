@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 12 (FINAL LAUNCH POLISH) tested end-to-end. Backend pytest /app/backend/tests/test_iteration12.py: 26/26 PASS. Frontend Playwright on desktop 1920x1080 verified all key flows. New pricing PER_TABLE=80.0 verified for ALL 6 tiers (10→₹944, 20→₹1888, 30→₹2832, 40→₹3776, 50→₹4720, 60→₹5664). POST /api/subscription correctly rejects tables<10 or tables>60 with 400. Subscription gate (status=none): POST /menu, POST /categories, POST /orders, PUT /orders/{x} all return 402 with detail 'Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.' GET /menu /categories /orders /stats/today and PUT /settings + PUT /profile remain OPEN (no 402). After POST /subscription flips status to trial, POST /categories + POST /menu succeed; test items cleaned up. POST /auth/request-otp returns {success, message} with NO demo_otp field (DEMO_MODE not set). DB initially clean: menu=[], categories=[], orders=[], subscription.status='none', has_access=false. Frontend: All 4 nav links (orders, tables, menu, sales) clickable with NO .locked class; none redirect. Explore-mode banner copy correct: 'Explore Mode — Browse freely, but you'll need an active subscription to take orders, generate bills & mark tickets. Start your 4-day free trial any time.' (No 'Subscribe to unlock' text.) On Menu page, filling Add-New-Item form and clicking 'Add to Menu' → 402 fires (visible in console) → page redirects to /subscribe within ~800ms (verified URL changed). Customer page does NOT redirect after 402 (it stays at /customer?table=1 as expected — only /manager paths redirect). Subscribe page formula-box at tables=14 shows '₹80 × 14 tables + GST 18% = ₹1,321.6/mo' (math correct but trailing zero trimmed — see minor issue below). DB restored to status='none' after tests; no test data left behind.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Subscribe.jsx formula-box / breakdown total",
+        "issue": "fmtRupee uses only maximumFractionDigits:2 without minimumFractionDigits:2, so total displays as '₹1,321.6' instead of '₹1,321.60' for tables=14. Currency should always show 2 decimals. Affects formula-box result, breakdown total, monthly-price card.",
+        "selector": "[data-testid='formula-box'], [data-testid='bk-total'], [data-testid='r-price']",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration12.py",
+    "/app/test_reports/pytest/iteration12_results.xml"
+  ],
+  "action_items": [
+    "Update fmtRupee in /app/frontend/src/pages/Subscribe.jsx (line 17) to add minimumFractionDigits:2 so currency always shows 2 decimals. Currently 'maximumFractionDigits: 2' alone strips trailing zeros — '₹1,321.6' should be '₹1,321.60' per spec. One-line fix: `(n ?? 0).toLocaleString(\"en-IN\", { minimumFractionDigits: 2, maximumFractionDigits: 2 })`. NOTE: All math is correct (backend returns 1321.6 = 1321.60); only display formatting is affected.",
+    "(Carry-over from iteration_10) SettingsSection devices-card help text still says '3rd device' — should be '5th device' since MAX_DEVICES=4."
+  ],
+  "critical_code_review_comments": [
+    "server.py: _require_subscription dependency added on the 6 write routes (POST/PUT/DELETE on /menu, /categories) plus POST /orders + PUT /orders/{id} — DELETE /orders is intentionally NOT gated; verify this is by design (line ~960). If managers shouldn't be able to DELETE orders without subscription, add the dependency there too.",
+    "server.py line ~270: _register_session docstring still says 'Enforces a 2-device cap' — stale comment from earlier iterations (cap is now 4). Cosmetic only.",
+    "server.py is now ~1190 lines — long overdue for splitting into routers/{auth,subscription,payments,orders,settings}.py.",
+    "DEMO_MODE flag at server.py:245 is good. The OTP flow correctly omits demo_otp from response when DEMO_MODE is false — verified.",
+    "frontend/src/lib/api.js: 402 interceptor uses window.location.assign instead of react-router navigate — causes a full page reload. Acceptable for now but consider using a navigation context for SPA-smooth experience."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration12.py",
+    "/app/test_reports/pytest/iteration12_results.xml",
+    "/app/test_reports/iteration_11.json"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26)",
+    "frontend": "95% (5/5 critical flows verified; 1 minor display issue with ₹1,321.6 vs ₹1,321.60)"
+  },
+  "test_credentials": "Manager PIN 1234 (verified working). Customer PIN 1234 (customer-login API verified).",
+  "seed_data_creation": "test_iteration12.py auto-resets DB subscription_status to 'none' before AND after the test module runs (autouse module fixture). During TestSubscriptionFlipAllowsWrite, one TEST_Cat12 category + one TEST_FlipItem menu item are created then deleted immediately. After all tests, DB is restored to: subscription_status='none', menu=[], categories=[], orders=[]. Verified post-run via curl. Test sessions with device_id prefix test_it12_ may remain in db.sessions but are harmless and will be evicted by LRU on next login.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 12 (LAUNCH POLISH) is GREEN. All backend gating works: status=none → 6 write endpoints return 402; GETs + settings/profile remain open. Subscription flip to trial unlocks writes. Pricing matches spec exactly (₹80/table, no base fee, 6 tiers 944→5664). DEMO_MODE off → request-otp does not leak demo_otp. Frontend nav fully unlocked; Explore-banner copy matches spec; Menu Add → 402 redirect verified. Subscribe page formula text format has minor display issue ('₹1,321.6' instead of '₹1,321.60' due to missing minimumFractionDigits in fmtRupee). Backend state after tests: subscription.status='none', menu/categories/orders all empty — launch-ready. Manager PIN remains 1234.",
+  "rca of the issue": "Display issue RCA: /app/frontend/src/pages/Subscribe.jsx line 17 defines fmtRupee = (n) => `₹${(n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`. Number.toLocaleString without minimumFractionDigits trims trailing zeros, so 1321.6 → '1,321.6'. Spec expects '₹1,321.60'. Fix: add minimumFractionDigits: 2. Math is correct end-to-end; only display formatting differs."
+}

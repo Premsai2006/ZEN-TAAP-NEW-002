@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -242,6 +242,27 @@ async def signup(req: SignupRequest):
 
 MAX_DEVICES = 4
 
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+
+
+async def _has_active_subscription() -> bool:
+    """Returns True only when the restaurant has an active or trialing subscription."""
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    status = doc.get("subscription_status", "none")
+    return status in ("trial", "active")
+
+
+async def _require_subscription():
+    """FastAPI dependency — raises 402 when there's no active subscription so the frontend
+    can show 'Subscribe to use this feature'. Manager remains free to browse/explore."""
+    ok = await _has_active_subscription()
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
+        )
+    return True
+
 
 async def _register_session(device_id: Optional[str], device_label: Optional[str]) -> dict:
     """Register a manager device session. Enforces a 2-device cap by evicting the
@@ -378,7 +399,12 @@ async def request_otp(body: RequestOtpBody):
         upsert=True,
     )
     masked = f"+91 •••••{saved[-4:]}" if len(saved) >= 4 else "your phone"
-    return {"success": True, "message": f"OTP sent to {masked}", "demo_otp": otp}
+    resp = {"success": True, "message": f"OTP sent to {masked}"}
+    # In demo/dev mode we expose the OTP so the recovery flow can be completed without
+    # an SMS gateway. NEVER ship to production with DEMO_MODE=true.
+    if DEMO_MODE:
+        resp["demo_otp"] = otp
+    return resp
 
 
 @api_router.post("/auth/verify-otp")
@@ -472,7 +498,7 @@ async def list_categories():
     return cats
 
 
-@api_router.post("/categories", response_model=Category)
+@api_router.post("/categories", response_model=Category, dependencies=[Depends(_require_subscription)])
 async def create_category(body: CategoryCreate):
     name = body.name.strip()
     if not name:
@@ -486,7 +512,7 @@ async def create_category(body: CategoryCreate):
     return cat
 
 
-@api_router.put("/categories/{cat_id}", response_model=Category)
+@api_router.put("/categories/{cat_id}", response_model=Category, dependencies=[Depends(_require_subscription)])
 async def rename_category(cat_id: str, body: CategoryCreate):
     name = body.name.strip()
     if not name:
@@ -507,7 +533,7 @@ async def rename_category(cat_id: str, body: CategoryCreate):
     return Category(id=cat_id, name=name, slug=slug)
 
 
-@api_router.delete("/categories/{cat_id}")
+@api_router.delete("/categories/{cat_id}", dependencies=[Depends(_require_subscription)])
 async def delete_category(cat_id: str):
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
     if not cat:
@@ -554,7 +580,7 @@ async def update_settings(body: SettingsUpdate):
 
 # ---------- Subscription (per-table pricing) ----------
 BASE_FEE = 0  # No base fee — pricing is purely per-table
-PER_TABLE = 79.9  # ₹ per table per month (10 tables → ₹942.82 incl GST, 60 → ₹5656.92)
+PER_TABLE = 80.0  # ₹ per table per month (10 tables → ₹944.00 incl GST, 60 → ₹5664.00)
 GST_RATE = 0.18  # 18% GST on SaaS in India
 MIN_TABLES = 10
 MAX_TABLES = 60
@@ -888,7 +914,7 @@ async def razorpay_webhook(request: Request):
     return {"received": True, "event": event}
 
 
-@api_router.post("/menu", response_model=MenuItem)
+@api_router.post("/menu", response_model=MenuItem, dependencies=[Depends(_require_subscription)])
 async def create_menu(body: MenuItemCreate):
     payload = body.model_dump()
     if payload.get("images") is None:
@@ -900,7 +926,7 @@ async def create_menu(body: MenuItemCreate):
     return item
 
 
-@api_router.put("/menu/{item_id}", response_model=MenuItem)
+@api_router.put("/menu/{item_id}", response_model=MenuItem, dependencies=[Depends(_require_subscription)])
 async def update_menu(item_id: str, body: MenuItemUpdate):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
@@ -916,7 +942,7 @@ async def update_menu(item_id: str, body: MenuItemUpdate):
     return item
 
 
-@api_router.delete("/menu/{item_id}")
+@api_router.delete("/menu/{item_id}", dependencies=[Depends(_require_subscription)])
 async def delete_menu(item_id: str):
     res = await db.menu_items.delete_one({"id": item_id})
     if res.deleted_count == 0:
@@ -931,7 +957,7 @@ async def list_orders():
     return orders
 
 
-@api_router.post("/orders", response_model=Order)
+@api_router.post("/orders", response_model=Order, dependencies=[Depends(_require_subscription)])
 async def create_order(body: OrderCreate):
     last = await db.orders.find({}, {"_id": 0}).sort("order_number", -1).limit(1).to_list(1)
     next_num = (last[0]["order_number"] + 1) if last else 1001
@@ -941,7 +967,7 @@ async def create_order(body: OrderCreate):
     return order
 
 
-@api_router.put("/orders/{order_id}", response_model=Order)
+@api_router.put("/orders/{order_id}", response_model=Order, dependencies=[Depends(_require_subscription)])
 async def update_order(order_id: str, body: OrderUpdate):
     res = await db.orders.update_one({"id": order_id}, {"$set": {"status": body.status}})
     if res.matched_count == 0:
@@ -1124,47 +1150,8 @@ async def upload_image(req: ImageUploadRequest):
 # ---------- Seed ----------
 @app.on_event("startup")
 async def seed():
-    # categories
-    if await db.categories.count_documents({}) == 0:
-        defaults = ["Starters", "Main Course", "Rice & Biryani", "Breads", "Drinks", "Desserts"]
-        for n in defaults:
-            slug = n.lower().replace(" ", "-").replace("&", "and")
-            await db.categories.insert_one(Category(name=n, slug=slug).model_dump())
-
-    # menu items
-    if await db.menu_items.count_documents({}) == 0:
-        seed_items = [
-            ("Paneer Tikka", 220, "Starters", "🧀"),
-            ("Chicken 65", 260, "Starters", "🍗"),
-            ("Dal Makhani", 220, "Main Course", "🥘"),
-            ("Butter Chicken", 320, "Main Course", "🍛"),
-            ("Chicken Biryani", 300, "Rice & Biryani", "🍛"),
-            ("Veg Biryani", 240, "Rice & Biryani", "🍚"),
-            ("Butter Naan", 60, "Breads", "🫓"),
-            ("Garlic Naan", 80, "Breads", "🫓"),
-            ("Mango Lassi", 120, "Drinks", "🥭"),
-            ("Gulab Jamun", 120, "Desserts", "🟤"),
-        ]
-        for n, p, c, e in seed_items:
-            await db.menu_items.insert_one(MenuItem(name=n, price=p, category=c, emoji=e).model_dump())
-
-    # demo orders for today
-    if await db.orders.count_documents({}) == 0:
-        today = datetime.now(timezone.utc).isoformat()
-        demo_orders = [
-            (1021, 4, [("Butter Chicken", 2, 320), ("Garlic Naan", 4, 80)], "new"),
-            (1020, 7, [("Paneer Tikka", 1, 220), ("Dal Makhani", 1, 220)], "cooking"),
-            (1019, 2, [("Chicken Biryani", 3, 300)], "cooking"),
-            (1018, 9, [("Butter Chicken", 2, 320), ("Butter Naan", 6, 60)], "done"),
-            (1017, 5, [("Veg Biryani", 2, 240), ("Mango Lassi", 2, 120)], "delivered"),
-            (1016, 11, [("Chicken 65", 2, 260), ("Butter Naan", 3, 60)], "delivered"),
-        ]
-        for num, table, items, status in demo_orders:
-            ois = [OrderItem(name=n, qty=q, price=pr) for n, q, pr in items]
-            amt = sum(o.qty * o.price for o in ois)
-            o = Order(order_number=num, table=table, items=ois, amount=amt, status=status, created_at=today)
-            await db.orders.insert_one(o.model_dump())
-
+    # Production launch: NO demo categories, menu items or orders are seeded.
+    # Each restaurant manager starts with a clean slate after sign-up.
     # restaurant settings (manager_pin is no longer auto-seeded — first-time signup creates the profile)
     if not await db.settings.find_one({"key": "restaurant"}):
         s = RestaurantSettings()
