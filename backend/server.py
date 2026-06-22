@@ -240,7 +240,7 @@ async def signup(req: SignupRequest):
     return {"success": True, "token": f"mgr-{uuid.uuid4()}"}
 
 
-MAX_DEVICES = 2
+MAX_DEVICES = 4
 
 
 async def _register_session(device_id: Optional[str], device_label: Optional[str]) -> dict:
@@ -553,8 +553,8 @@ async def update_settings(body: SettingsUpdate):
 
 
 # ---------- Subscription (per-table pricing) ----------
-BASE_FEE = 299  # ₹/month
-PER_TABLE = 50  # ₹ per table per month
+BASE_FEE = 0  # No base fee — pricing is purely per-table
+PER_TABLE = 79.9  # ₹ per table per month (10 tables → ₹942.82 incl GST, 60 → ₹5656.92)
 GST_RATE = 0.18  # 18% GST on SaaS in India
 MIN_TABLES = 10
 MAX_TABLES = 60
@@ -564,14 +564,14 @@ TRIAL_DAYS = 4
 def _compute_price(tables: int):
     if tables < MIN_TABLES or tables > MAX_TABLES:
         raise HTTPException(status_code=400, detail=f"Tables must be between {MIN_TABLES} and {MAX_TABLES}")
-    subtotal = BASE_FEE + PER_TABLE * tables
+    subtotal = round(BASE_FEE + PER_TABLE * tables, 2)
     gst = round(subtotal * GST_RATE, 2)
     total = round(subtotal + gst, 2)
     return {
         "tables": tables,
         "base_fee": BASE_FEE,
         "per_table": PER_TABLE,
-        "tables_subtotal": PER_TABLE * tables,
+        "tables_subtotal": round(PER_TABLE * tables, 2),
         "subtotal": subtotal,
         "gst_rate_pct": int(GST_RATE * 100),
         "gst_amount": gst,

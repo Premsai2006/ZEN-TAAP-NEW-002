@@ -4,9 +4,12 @@ import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Printer } from "lucide-react";
 import { api } from "@/lib/api";
-import { UPILogo, CardLogo, BankLogo, WalletLogo } from "@/components/subscribe/PaymentLogos";
-
-const METHOD_LOGOS = { upi: UPILogo, card: CardLogo, netbanking: BankLogo, wallet: WalletLogo };
+import {
+  GPayMark, PhonePeMark, PaytmMark, BHIMMark,
+  VisaMark, MastercardMark, RuPayMark,
+  HDFCMark, ICICIMark, SBIMark, AxisMark,
+  AmazonPayMark, FreechargeMark, MobikwikMark,
+} from "@/components/subscribe/BrandLogos";
 
 const MIN_T = 10;
 const MAX_T = 60;
@@ -23,47 +26,28 @@ const PAYMENT_METHODS = [
     label: "UPI",
     icon: Smartphone,
     note: "GPay · PhonePe · Paytm · BHIM",
-    brands: [
-      { sym: "G", cls: "gpay", title: "Google Pay" },
-      { sym: "PP", cls: "phonepe", title: "PhonePe" },
-      { sym: "P", cls: "paytm", title: "Paytm" },
-      { sym: "B", cls: "bhim", title: "BHIM" },
-    ],
+    marks: [GPayMark, PhonePeMark, PaytmMark, BHIMMark],
   },
   {
     key: "card",
     label: "Credit / Debit Card",
     icon: CreditCard,
     note: "VISA · MasterCard · RuPay",
-    brands: [
-      { sym: "V", cls: "visa", title: "VISA" },
-      { sym: "◉◉", cls: "mc", title: "Mastercard" },
-      { sym: "R", cls: "rupay", title: "RuPay" },
-    ],
+    marks: [VisaMark, MastercardMark, RuPayMark],
   },
   {
     key: "netbanking",
     label: "Net Banking",
     icon: Building2,
     note: "HDFC · ICICI · SBI · Axis",
-    brands: [
-      { sym: "H", cls: "hdfc", title: "HDFC" },
-      { sym: "I", cls: "icici", title: "ICICI" },
-      { sym: "S", cls: "sbi", title: "SBI" },
-      { sym: "A", cls: "axis", title: "Axis" },
-    ],
+    marks: [HDFCMark, ICICIMark, SBIMark, AxisMark],
   },
   {
     key: "wallet",
     label: "Wallets",
     icon: Wallet,
-    note: "Paytm · MobiKwik · Amazon Pay · Freecharge",
-    brands: [
-      { sym: "P", cls: "pt", title: "Paytm" },
-      { sym: "M", cls: "mb", title: "MobiKwik" },
-      { sym: "a", cls: "amzn", title: "Amazon Pay" },
-      { sym: "F", cls: "frc", title: "Freecharge" },
-    ],
+    note: "Amazon Pay · Freecharge · MobiKwik · Paytm",
+    marks: [AmazonPayMark, FreechargeMark, MobikwikMark, PaytmMark],
   },
 ];
 
@@ -110,7 +94,6 @@ export default function Subscribe() {
         return new Date(existing.trial_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
       } catch (err) {
         // Invalid stored ISO string — fall through to computed (+4d). Log so we can spot bad data.
-        // eslint-disable-next-line no-console
         console.warn("Subscribe.trialEnd: bad existing.trial_end", existing.trial_end, err);
       }
     }
@@ -475,8 +458,6 @@ export default function Subscribe() {
             <div className="formula-box" data-testid="formula-box">
               <div className="formula-title">HOW THE PRICE IS CALCULATED</div>
               <div className="formula-row">
-                <div className="f-box">₹{pricing.base_fee}</div>
-                <div className="f-op">+</div>
                 <div className="f-box highlight">₹{pricing.per_table} × {tables} tables</div>
                 <div className="f-op">+</div>
                 <div className="f-box" style={{ background: "rgba(110,164,255,0.15)" }}>GST 18%</div>
@@ -484,8 +465,7 @@ export default function Subscribe() {
                 <div className="f-box result">{fmtRupee(pricing.total_with_tax)}/mo</div>
               </div>
               <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 12, lineHeight: 1.7 }}>
-                <strong style={{ color: "var(--text)" }}>Base fee ₹{pricing.base_fee}</strong> — covers platform access, kitchen dashboard, manager dashboard, menu<br />
-                <strong style={{ color: "var(--text)" }}>₹{pricing.per_table} per table</strong> — one QR code per table, order flow, real-time updates
+                <strong style={{ color: "var(--text)" }}>₹{pricing.per_table} per table / month</strong> — includes one QR code per table, full kitchen + manager dashboards, live orders, real-time updates and analytics. No setup fees, no hidden charges.
               </div>
             </div>
           </>
@@ -496,10 +476,6 @@ export default function Subscribe() {
             <div className="bk-header">
               <span>MONTHLY INVOICE — ZENTAAP</span>
               <span>{monthLabel}</span>
-            </div>
-            <div className="bk-row">
-              <span className="bk-muted">Platform base fee</span>
-              <span className="bk-amt">₹{pricing.base_fee}</span>
             </div>
             <div className="bk-row">
               <span className="bk-muted">{tables} tables × ₹{pricing.per_table}/table</span>
@@ -526,7 +502,6 @@ export default function Subscribe() {
         </div>
         <div className="payment-grid" data-testid="payment-grid">
           {PAYMENT_METHODS.map((m) => {
-            const Logo = METHOD_LOGOS[m.key];
             return (
               <button
                 key={m.key}
@@ -540,22 +515,12 @@ export default function Subscribe() {
                     <Check size={12} />
                   </div>
                 )}
-                <div className="payment-card-logo">
-                  {Logo ? <Logo size={32} /> : null}
-                </div>
                 <div className="payment-card-label">{m.label}</div>
                 <div className="payment-card-note">{m.note}</div>
-                {m.brands && (
-                  <div className="pay-brands" data-testid={`pay-brands-${m.key}`}>
-                    {m.brands.map((b) => (
-                      <span
-                        key={b.cls}
-                        className={`pay-brand pay-brand-sym ${b.cls}`}
-                        title={b.title}
-                        aria-label={b.title}
-                      >
-                        {b.sym}
-                      </span>
+                {m.marks && (
+                  <div className="pay-marks" data-testid={`pay-marks-${m.key}`}>
+                    {m.marks.map((Mark, i) => (
+                      <Mark key={i} />
                     ))}
                   </div>
                 )}

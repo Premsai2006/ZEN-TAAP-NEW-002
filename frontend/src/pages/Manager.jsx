@@ -21,6 +21,8 @@ const NAV = [
 ];
 
 export default function Manager() {
+  // Default landing section is "orders". When subscription is locked/expired, the gating
+  // useEffect below switches it to "profile" automatically (no flash).
   const [active, setActive] = useState("orders");
   const [showLogout, setShowLogout] = useState(false);
   const [showRevenue, setShowRevenue] = useState(false);
@@ -51,7 +53,6 @@ export default function Manager() {
       setSubscription(sub.data);
     } catch (err) {
       // Silent on 1s poll loop — would spam the toast. Log so devs see it in console.
-      // eslint-disable-next-line no-console
       console.warn("Manager.refresh failed:", err?.response?.status, err?.message);
     }
   }, []);
@@ -102,8 +103,7 @@ export default function Manager() {
     if (!hasAccess && !allowedSectionsWhenLocked.has(active)) {
       setActive("profile");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAccess]);
+  }, [hasAccess, active]);
 
   const [mobileNav, setMobileNav] = useState(false);
   const isLocked = !hasAccess;
