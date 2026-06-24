@@ -81,8 +81,16 @@ export default function Manager() {
     return () => clearInterval(id);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch (err) {
+      // Even if the server call fails, we still clear local state so the user
+      // is logged out client-side. Log so devs can see it.
+      console.warn("logout request failed:", err?.message);
+    }
     localStorage.removeItem("mgr_token");
+    localStorage.removeItem("mgr_authed");
     navigate("/login");
   };
 

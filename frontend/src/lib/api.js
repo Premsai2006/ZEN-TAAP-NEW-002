@@ -4,22 +4,28 @@ import { toast } from "sonner";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-export const api = axios.create({ baseURL: API });
+// withCredentials lets the browser send the httpOnly `mgr_token` cookie set by
+// /api/auth/login. The backend `_require_manager` dependency reads the cookie
+// first and falls back to the `Authorization: Bearer` header.
+export const api = axios.create({ baseURL: API, withCredentials: true });
 
-// Attach the manager Bearer token (when present) to every request so protected
-// manager-only endpoints work transparently. Customer / Kitchen pages have no
-// token so they hit only the open endpoints.
+// Belt-and-suspenders fallback: if a legacy `mgr_token` exists in localStorage
+// (older browsers from before the cookie migration) we keep attaching it as a
+// Bearer header so the user isn't kicked out. New logins won't write to
+// localStorage anymore — the cookie is authoritative.
 api.interceptors.request.use((config) => {
-  const t = typeof window !== "undefined" ? localStorage.getItem("mgr_token") : null;
-  if (t) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${t}`;
+  if (typeof window !== "undefined") {
+    const t = localStorage.getItem("mgr_token");
+    if (t) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${t}`;
+    }
   }
   return config;
 });
 
 // Global 401 / 402 handlers.
-// - 401 → manager token invalid: clear it + bounce to /login.
+// - 401 → manager session invalid: clear local hints + bounce to /login.
 // - 402 → no active subscription: toast + bounce manager-pages to /subscribe.
 let _redirecting = false;
 api.interceptors.response.use(
@@ -32,6 +38,7 @@ api.interceptors.response.use(
         if (!_redirecting) {
           _redirecting = true;
           localStorage.removeItem("mgr_token");
+          localStorage.removeItem("mgr_authed");
           toast.error("Session expired — please log in again.");
           setTimeout(() => { _redirecting = false; window.location.assign("/login"); }, 600);
         }

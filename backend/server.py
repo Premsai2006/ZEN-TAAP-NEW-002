@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Response, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -254,15 +254,51 @@ MAX_DEVICES = 4
 
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 
+# Cookie name used to ship the manager session token to the browser as httpOnly.
+# We keep accepting `Authorization: Bearer <token>` as a fallback so older clients,
+# SDK consumers and pytest curl flows continue to work unchanged.
+MGR_COOKIE = "mgr_token"
+
+
+def _extract_manager_token(request: Request) -> str:
+    """Return the manager session token from cookie OR Authorization header."""
+    cookie_token = request.cookies.get(MGR_COOKIE)
+    if cookie_token:
+        return cookie_token.strip()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return ""
+
+
+def _set_manager_cookie(response: Response, token: str) -> None:
+    """Set the manager session as an httpOnly cookie.
+    - httpOnly: blocks XSS-based token theft.
+    - sameSite=lax: blocks cross-site CSRF on state-changing nav.
+    - secure: only enabled in production (DEMO_MODE=false) since dev runs http.
+    """
+    response.set_cookie(
+        key=MGR_COOKIE,
+        value=token,
+        httponly=True,
+        secure=not DEMO_MODE,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 30,  # 30 days
+    )
+
+
+def _clear_manager_cookie(response: Response) -> None:
+    response.delete_cookie(key=MGR_COOKIE, path="/")
+
 
 async def _require_manager(request: Request):
-    """Bearer-token guard for manager-only endpoints.
-    Reads `Authorization: Bearer <token>` and validates against db.sessions.
-    Touches last_used so the LRU eviction (4-device cap) tracks real activity."""
-    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing manager token")
-    token = auth.split(" ", 1)[1].strip()
+    """Session guard for manager-only endpoints.
+    Reads the manager token from the httpOnly cookie (preferred) or
+    `Authorization: Bearer <token>` (legacy fallback) and validates against
+    db.sessions. Touches last_used so the LRU eviction (4-device cap)
+    tracks real activity."""
+    token = _extract_manager_token(request)
     if not token:
         raise HTTPException(status_code=401, detail="Missing manager token")
     sess = await db.sessions.find_one({"scope": "manager", "token": token})
@@ -296,8 +332,8 @@ async def _require_subscription():
 
 
 async def _register_session(device_id: Optional[str], device_label: Optional[str]) -> dict:
-    """Register a manager device session. Enforces a 2-device cap by evicting the
-    least-recently-used session when a new third device tries to log in."""
+    """Register a manager device session. Enforces the 4-device cap by evicting the
+    least-recently-used session when a new device beyond the cap tries to log in."""
     now_iso = datetime.now(timezone.utc).isoformat()
     token = f"mgr-{uuid.uuid4()}"
     if not device_id:
@@ -333,7 +369,7 @@ async def _register_session(device_id: Optional[str], device_label: Optional[str
 
 
 @api_router.post("/auth/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, response: Response):
     _validate_pin(req.pin)
     p = await _get_profile()
     stored = p.get("pin") if p else None
@@ -346,6 +382,9 @@ async def login(req: LoginRequest):
     if req.pin != stored:
         raise HTTPException(status_code=401, detail="Incorrect PIN")
     sess = await _register_session(req.device_id, req.device_label)
+    # httpOnly cookie is the primary auth carrier; the token body is kept for
+    # legacy clients (pytest, direct curl) and one-time storage during sign-in.
+    _set_manager_cookie(response, sess["token"])
     return {
         "success": True,
         "token": sess["token"],
@@ -353,6 +392,16 @@ async def login(req: LoginRequest):
         "active_devices": sess["active_devices"],
         "max_devices": MAX_DEVICES,
     }
+
+
+@api_router.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    """Revoke the current device session and clear the httpOnly cookie."""
+    token = _extract_manager_token(request)
+    if token:
+        await db.sessions.delete_one({"scope": "manager", "token": token})
+    _clear_manager_cookie(response)
+    return {"success": True}
 
 
 @api_router.get("/auth/sessions", dependencies=[Depends(_require_manager)])
@@ -606,7 +655,7 @@ async def get_settings():
     return RestaurantSettings(**doc)
 
 
-@api_router.put("/settings", response_model=RestaurantSettings)
+@api_router.put("/settings", response_model=RestaurantSettings, dependencies=[Depends(_require_manager)])
 async def update_settings(body: SettingsUpdate):
     # Use exclude_unset so explicit null values (e.g. clearing gst_rate) are honored
     update = body.model_dump(exclude_unset=True)
@@ -1017,92 +1066,113 @@ async def update_order(order_id: str, body: OrderUpdate):
 
 
 # ---------- Stats ----------
-@api_router.get("/stats/today", dependencies=[Depends(_require_manager)])
-async def stats_today():
-    from datetime import timedelta
-    today = datetime.now(timezone.utc).date()
-    today_iso = today.isoformat()
-    orders = await db.orders.find({"created_at": {"$regex": f"^{today_iso}"}}, {"_id": 0}).to_list(1000)
-    total_orders = len(orders)
-    revenue = sum(o["amount"] for o in orders)
-    completed = sum(1 for o in orders if o["status"] in ("done", "delivered"))
-    pending = sum(1 for o in orders if o["status"] == "new")
-    active_tables = len({o["table"] for o in orders if o["status"] in ("new", "cooking")})
+# ---------- Stats helpers ----------
+async def _orders_in_range(start_iso: str, end_iso: str) -> list:
+    return await db.orders.find(
+        {"created_at": {"$gte": start_iso, "$lt": end_iso}}, {"_id": 0}
+    ).to_list(5000)
 
-    avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
-    gross_profit = round(revenue * 0.65, 2)
 
-    # 7-day vs prior-7-day growth
+def _aggregate_orders(orders: list) -> dict:
+    """Returns {orders, revenue, completed, aov} for a list of orders."""
+    n = len(orders)
+    rev = sum(o["amount"] for o in orders)
+    comp = sum(1 for o in orders if o["status"] in ("done", "delivered"))
+    return {
+        "orders": n,
+        "revenue": rev,
+        "completed": comp,
+        "aov": round(rev / n, 2) if n else 0,
+    }
+
+
+def _growth_pct(current: float, prior: float) -> float:
+    """Percentage growth current vs prior; 100% when prior is 0 and current > 0."""
+    if prior == 0:
+        return 100.0 if current > 0 else 0.0
+    return round((current - prior) / prior * 100, 1)
+
+
+async def _seven_day_growth(today: date) -> dict:
+    """Returns growth_7d{revenue,orders,completed,aov} comparing last-7d to prior-7d."""
     last_7_start = today - timedelta(days=6)
     last_7_end = today + timedelta(days=1)
     prev_7_start = today - timedelta(days=13)
     prev_7_end = today - timedelta(days=6)
-
-    async def _agg(start_iso, end_iso):
-        os_ = await db.orders.find(
-            {"created_at": {"$gte": start_iso, "$lt": end_iso}}, {"_id": 0}
-        ).to_list(5000)
-        rev = sum(o["amount"] for o in os_)
-        comp = sum(1 for o in os_ if o["status"] in ("done", "delivered"))
-        return {
-            "orders": len(os_),
-            "revenue": rev,
-            "completed": comp,
-            "aov": round(rev / len(os_), 2) if os_ else 0,
-        }
-
-    current = await _agg(last_7_start.isoformat(), last_7_end.isoformat())
-    prior = await _agg(prev_7_start.isoformat(), prev_7_end.isoformat())
-
-    def _grow(c, p):
-        if p == 0:
-            return 100.0 if c > 0 else 0.0
-        return round((c - p) / p * 100, 1)
-
-    growth_7d = {
-        "revenue": _grow(current["revenue"], prior["revenue"]),
-        "orders": _grow(current["orders"], prior["orders"]),
-        "completed": _grow(current["completed"], prior["completed"]),
-        "aov": _grow(current["aov"], prior["aov"]),
+    current = _aggregate_orders(await _orders_in_range(last_7_start.isoformat(), last_7_end.isoformat()))
+    prior = _aggregate_orders(await _orders_in_range(prev_7_start.isoformat(), prev_7_end.isoformat()))
+    return {
+        "revenue": _growth_pct(current["revenue"], prior["revenue"]),
+        "orders": _growth_pct(current["orders"], prior["orders"]),
+        "completed": _growth_pct(current["completed"], prior["completed"]),
+        "aov": _growth_pct(current["aov"], prior["aov"]),
     }
 
-    # top items
+
+def _count_top_items(orders: list) -> list:
+    """Returns list of {name, qty, revenue} sorted by qty desc (top 6)."""
     counter = {}
     for o in orders:
         for it in o["items"]:
-            key = it["name"]
-            entry = counter.setdefault(key, {"name": key, "qty": 0, "revenue": 0.0})
+            entry = counter.setdefault(it["name"], {"name": it["name"], "qty": 0, "revenue": 0.0})
             entry["qty"] += it["qty"]
             entry["revenue"] += it["qty"] * it["price"]
-    top = sorted(counter.values(), key=lambda x: x["qty"], reverse=True)[:6]
+    return sorted(counter.values(), key=lambda x: x["qty"], reverse=True)[:6]
 
-    item_names = list({it_name for o in orders for it_name in (i["name"] for i in o["items"])})
+
+async def _menu_meta_for(orders: list) -> tuple:
+    """Returns (cat_map, img_map, emoji_map) for every item name that appears in orders."""
+    item_names = list({it["name"] for o in orders for it in o["items"]})
     items = (
         await db.menu_items.find({"name": {"$in": item_names}}, {"_id": 0}).to_list(500)
         if item_names else []
     )
     cat_map = {i["name"]: (i.get("category") or "Uncategorized") for i in items}
-    img_map = {i["name"]: (i.get("images") or ([i.get("image_url")] if i.get("image_url") else []))[0] if i.get("images") or i.get("image_url") else "" for i in items}
+    img_map = {
+        i["name"]: ((i.get("images") or ([i.get("image_url")] if i.get("image_url") else []))[0]
+                    if (i.get("images") or i.get("image_url")) else "")
+        for i in items
+    }
     emoji_map = {i["name"]: i.get("emoji", "🍽️") for i in items}
+    return cat_map, img_map, emoji_map
 
-    if top:
-        for t in top:
-            t["category"] = cat_map.get(t["name"], "Uncategorized")
-            t["image"] = img_map.get(t["name"], "")
-            t["emoji"] = emoji_map.get(t["name"], "🍽️")
 
+def _revenue_by_category(orders: list, cat_map: dict, revenue: float) -> list:
     cat_rev = {}
     for o in orders:
         for it in o["items"]:
             cat = cat_map.get(it["name"], "Uncategorized")
             cat_rev[cat] = cat_rev.get(cat, 0) + it["qty"] * it["price"]
-    revenue_by_category = [
+    return [
         {"category": k, "revenue": round(v, 2), "percent": round((v / revenue * 100) if revenue else 0, 1)}
         for k, v in sorted(cat_rev.items(), key=lambda x: x[1], reverse=True)
     ]
 
-    most_ordered = top[0]["name"] if top else "—"
-    most_count = top[0]["qty"] if top else 0
+
+@api_router.get("/stats/today", dependencies=[Depends(_require_manager)])
+async def stats_today():
+    today = datetime.now(timezone.utc).date()
+    today_iso = today.isoformat()
+    orders = await db.orders.find({"created_at": {"$regex": f"^{today_iso}"}}, {"_id": 0}).to_list(1000)
+
+    total_orders = len(orders)
+    revenue = sum(o["amount"] for o in orders)
+    completed = sum(1 for o in orders if o["status"] in ("done", "delivered"))
+    pending = sum(1 for o in orders if o["status"] == "new")
+    active_tables = len({o["table"] for o in orders if o["status"] in ("new", "cooking")})
+    avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
+    gross_profit = round(revenue * 0.65, 2)
+
+    growth_7d = await _seven_day_growth(today)
+
+    top = _count_top_items(orders)
+    cat_map, img_map, emoji_map = await _menu_meta_for(orders)
+    for t in top:
+        t["category"] = cat_map.get(t["name"], "Uncategorized")
+        t["image"] = img_map.get(t["name"], "")
+        t["emoji"] = emoji_map.get(t["name"], "🍽️")
+
+    revenue_by_category = _revenue_by_category(orders, cat_map, revenue)
 
     return {
         "total_orders": total_orders,
@@ -1112,8 +1182,8 @@ async def stats_today():
         "active_tables": active_tables,
         "avg_order_value": avg_order_value,
         "gross_profit": gross_profit,
-        "most_ordered": most_ordered,
-        "most_count": most_count,
+        "most_ordered": top[0]["name"] if top else "—",
+        "most_count": top[0]["qty"] if top else 0,
         "top_items": top,
         "revenue_by_category": revenue_by_category,
         "growth_7d": growth_7d,

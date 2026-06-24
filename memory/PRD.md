@@ -185,6 +185,26 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 ## Next Action Items
 - (Optional) Add a **Subscribe** link/icon to the manager sidebar (currently `/subscribe` is direct-URL only).
 - (Optional) Silence Recharts `width(-1) height(-1)` console warnings on Sales tab initial mount via explicit ResponsiveContainer aspect.
+
+## Iteration 13 (2026-06-22) — PRODUCTION HARDENING (final)
+- **Customer PIN removed** — `/customer` is fully open; `?table=N` query param is the only access control (encoded in printed QRs).
+- **Kitchen PIN added** — new endpoints `POST /api/auth/kitchen-login`, `GET/PUT /api/settings/kitchen-pin`. Manager configures in Settings → "Kitchen Display PIN".
+- **Cart FAB centered** — `bottom: 24px; left: 50%; transform: translateX(-50%)`. Drawer still slides from right.
+- **Bearer-token manager auth** — new `_require_manager(request)` FastAPI dependency validates `Authorization: Bearer <token>` against `db.sessions` and touches `last_used`. Applied to: PUT /profile, PUT /settings, PUT /settings/kitchen-pin, GET /settings/customer-pin (legacy), GET /stats/today, GET /stats/revenue, GET /auth/sessions, DELETE /auth/sessions/{id}, plus chained on the 6 menu/category writes. POST/PUT /orders stay open (customer + kitchen flows).
+- **Razorpay link** env-only — `RAZORPAY_PAYMENT_LINK` defaults to empty string. No hardcoded personal links.
+- **CORS hardening** — production `DEMO_MODE=false` fail-closes any `*` in `CORS_ORIGINS` to localhost-only. Operator must set explicit production origins.
+- **DEMO_MODE flag** — when `false`, `/auth/request-otp` strips `demo_otp` from response.
+- **Frontend axios interceptor** — auto-attaches Bearer from `localStorage.mgr_token`; handles 401 (clear token + /login) and 402 (toast + /subscribe).
+- **`LAUNCH.md`** runbook added at `/app` with prod `.env` template, Razorpay webhook URL, deploy checklist.
+- **Production build verified** — `CI=true yarn build` exits 0. `yarn.lock` + `requirements.txt` in place.
+- **Critical bug fixed in test loop**: `PUT /api/settings` was missing the `_require_manager` guard — added post-test, verified 401→200 with token.
+
+## Verified Tests (iteration_13.json — LAUNCH)
+- Backend pytest: 17 covered, 16 PASS + 1 SKIP (Kitchen-PIN-not-set test path), 1 CRITICAL fix applied post-test → all green.
+- Frontend Playwright 100% — Customer no-PIN, Table 7 lock, Kitchen PIN gate end-to-end, Settings kitchen-pin-form, mgr_token attached.
+- `yarn build` clean.
+- Razorpay still in DEMO MODE (no API keys in dev .env). Production cutover documented in LAUNCH.md.
+
 - (Optional) Allow `PUT /api/settings` to clear `gst_rate` when explicit `null` is sent (iter-3 carryover).
 - (Refactor) Split `server.py` (~765 lines) into `routers/{auth,menu,orders,stats,subscription}.py`.
 - (Security/P1) Bcrypt-hash manager PIN; add bearer-token check on write endpoints; rate-limit `recover-pin`.

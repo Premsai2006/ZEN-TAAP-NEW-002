@@ -19,6 +19,16 @@ def http():
     return s
 
 
+@pytest.fixture
+def no_auth_http():
+    """Fresh session with NO cookies — for negative-auth tests.
+    The shared `http` session retains the httpOnly mgr_token cookie from /auth/login,
+    so it can't be used to assert 'request without auth -> 401'."""
+    s = requests.Session()
+    s.headers.update({"Content-Type": "application/json"})
+    return s
+
+
 @pytest.fixture(scope="module")
 def mgr_token(http):
     """Log in as manager and return Bearer token. Skip suite if PIN auth broken."""
@@ -49,13 +59,13 @@ def reset_subscription(http, mgr_token):
 
 # ---------- 1. Manager Bearer auth on /profile ----------
 class TestManagerAuth:
-    def test_profile_put_no_token_returns_401(self, http):
-        r = http.put(f"{API}/profile", json={"manager_name": "X"})
+    def test_profile_put_no_token_returns_401(self, no_auth_http):
+        r = no_auth_http.put(f"{API}/profile", json={"manager_name": "X"})
         assert r.status_code == 401
         assert "Missing manager token" in r.json().get("detail", "")
 
-    def test_profile_put_invalid_token_returns_401(self, http):
-        r = http.put(f"{API}/profile",
+    def test_profile_put_invalid_token_returns_401(self, no_auth_http):
+        r = no_auth_http.put(f"{API}/profile",
                      headers={"Authorization": "Bearer mgr-INVALID-xyz", "Content-Type": "application/json"},
                      json={"manager_name": "X"})
         assert r.status_code == 401
@@ -70,10 +80,10 @@ class TestManagerAuth:
         assert r.status_code == 200, r.text
         assert r.json()["manager_name"] == original_name
 
-    def test_settings_put_requires_token(self, http, auth_headers):
+    def test_settings_put_requires_token(self, http, no_auth_http, auth_headers):
         # Without token — currently /settings PUT has no _require_manager in code I read,
         # but spec says it should. Verify spec behavior.
-        r_no = http.put(f"{API}/settings", json={"restaurant_name": "X"})
+        r_no = no_auth_http.put(f"{API}/settings", json={"restaurant_name": "X"})
         # If endpoint protected -> 401; if open -> 200. Spec says protected.
         # Test both and report.
         if r_no.status_code == 401:
@@ -86,21 +96,21 @@ class TestManagerAuth:
             # Endpoint is OPEN — flag this as a finding (settings should be manager-only per spec)
             pytest.fail(f"PUT /settings is OPEN (status {r_no.status_code}); spec requires manager token")
 
-    def test_stats_today_requires_token(self, http, auth_headers):
-        r_no = http.get(f"{API}/stats/today")
+    def test_stats_today_requires_token(self, http, no_auth_http, auth_headers):
+        r_no = no_auth_http.get(f"{API}/stats/today")
         assert r_no.status_code == 401, f"stats/today should require token, got {r_no.status_code}"
         r_ok = http.get(f"{API}/stats/today", headers=auth_headers)
         assert r_ok.status_code == 200
         assert "total_orders" in r_ok.json()
 
-    def test_stats_revenue_requires_token(self, http, auth_headers):
-        r = http.get(f"{API}/stats/revenue?period=week")
+    def test_stats_revenue_requires_token(self, http, no_auth_http, auth_headers):
+        r = no_auth_http.get(f"{API}/stats/revenue?period=week")
         assert r.status_code == 401
         r2 = http.get(f"{API}/stats/revenue?period=week", headers=auth_headers)
         assert r2.status_code == 200
 
-    def test_sessions_requires_token(self, http, auth_headers):
-        r = http.get(f"{API}/auth/sessions")
+    def test_sessions_requires_token(self, http, no_auth_http, auth_headers):
+        r = no_auth_http.get(f"{API}/auth/sessions")
         assert r.status_code == 401
         r2 = http.get(f"{API}/auth/sessions", headers=auth_headers)
         assert r2.status_code == 200
@@ -113,12 +123,12 @@ class TestManagerAuth:
 
 # ---------- 2. Subscription gating on menu/category writes ----------
 class TestMenuWriteGating:
-    def test_post_menu_without_token_401(self, http):
-        r = http.post(f"{API}/menu", json={"name": "X", "price": 10})
+    def test_post_menu_without_token_401(self, no_auth_http):
+        r = no_auth_http.post(f"{API}/menu", json={"name": "X", "price": 10})
         assert r.status_code == 401, f"POST /menu without token must be 401, got {r.status_code}"
 
-    def test_post_category_without_token_401(self, http):
-        r = http.post(f"{API}/categories", json={"name": "TEST_NoAuth"})
+    def test_post_category_without_token_401(self, no_auth_http):
+        r = no_auth_http.post(f"{API}/categories", json={"name": "TEST_NoAuth"})
         assert r.status_code == 401
 
     def test_post_menu_with_token_status_402_or_200(self, http, auth_headers):
@@ -145,8 +155,8 @@ class TestOrdersOpenForCustomer:
 
 # ---------- 4. Kitchen PIN flow ----------
 class TestKitchenPin:
-    def test_kitchen_pin_put_requires_manager(self, http):
-        r = http.put(f"{API}/settings/kitchen-pin", json={"new_pin": "5678"})
+    def test_kitchen_pin_put_requires_manager(self, no_auth_http):
+        r = no_auth_http.put(f"{API}/settings/kitchen-pin", json={"new_pin": "5678"})
         assert r.status_code == 401
 
     def test_kitchen_login_when_not_set_returns_404(self, http, auth_headers):

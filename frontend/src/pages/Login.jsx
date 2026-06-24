@@ -51,7 +51,12 @@ export default function Login() {
         /* default */
       }
       const { data } = await api.post("/auth/login", { pin, device_id: deviceId, device_label: label });
-      localStorage.setItem("mgr_token", data.token);
+      // httpOnly cookie is the auth source of truth now — set by the backend
+      // on this same response. We keep a non-sensitive flag for UI awareness.
+      localStorage.setItem("mgr_authed", "1");
+      // Legacy hint for any code still reading the raw token (kept as fallback
+      // for the bearer-header path until we fully remove it in a follow-up).
+      if (data.token) localStorage.setItem("mgr_token", data.token);
       if (data.active_devices >= data.max_devices) {
         toast.success(`Welcome back · ${data.active_devices}/${data.max_devices} devices used`);
       } else {
