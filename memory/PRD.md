@@ -199,11 +199,19 @@ The user supplied a reference HTML file of a Manager Dashboard (`manager-dashboa
 - **Production build verified** — `CI=true yarn build` exits 0. `yarn.lock` + `requirements.txt` in place.
 - **Critical bug fixed in test loop**: `PUT /api/settings` was missing the `_require_manager` guard — added post-test, verified 401→200 with token.
 
-## Verified Tests (iteration_13.json — LAUNCH)
-- Backend pytest: 17 covered, 16 PASS + 1 SKIP (Kitchen-PIN-not-set test path), 1 CRITICAL fix applied post-test → all green.
-- Frontend Playwright 100% — Customer no-PIN, Table 7 lock, Kitchen PIN gate end-to-end, Settings kitchen-pin-form, mgr_token attached.
-- `yarn build` clean.
-- Razorpay still in DEMO MODE (no API keys in dev .env). Production cutover documented in LAUNCH.md.
+## Iteration 14 (2026-06-24) — Refactor + Cookie Auth Migration
+- **Backend refactor** — `stats_today()` extracted into 5 small helpers (`_orders_in_range`, `_aggregate_orders`, `_growth_pct`, `_seven_day_growth`, `_count_top_items`, `_menu_meta_for`, `_revenue_by_category`). Response shape unchanged.
+- **Frontend refactor** — `MenuSection.jsx` (504→57 lines) split into `menu/MenuForm.jsx` + `menu/MenuItemCard.jsx` + `menu/MenuSearchBar.jsx`. `SettingsSection.jsx` (594→20 lines) split into `settings/{AppearanceCard, BillBrandingForm, ChangePinForm, KitchenPinForm, DevicesCard, RecoverPinForm}.jsx`.
+- **httpOnly cookie auth migration (hybrid)** — `/api/auth/login` now also sets an httpOnly `mgr_token` cookie (sameSite=Lax, secure only in production). `_require_manager` reads cookie first, falls back to `Authorization: Bearer` header for legacy SDK / pytest / curl callers. Frontend axios uses `withCredentials: true`. New `POST /api/auth/logout` endpoint deletes the server session and clears the cookie.
+- **Frontend `Login.jsx`** stores `mgr_authed=1` flag for UI state; raw token kept in localStorage as fallback for the bearer path until a future cleanup pass.
+- **Frontend `Manager.jsx`** logout calls `POST /api/auth/logout` before navigating to `/login`.
+
+## Verified Tests (iteration_14.json — REFACTOR + COOKIE)
+- Backend pytest 22/23 PASS · 1 SKIP · 0 FAIL across test_iteration13.py + test_iteration14.py.
+- New `test_iteration14.py` covers: login sets httpOnly cookie, cookie alone authenticates, Bearer header still works (legacy), logout clears cookie + session, stats_today response shape regression.
+- Frontend Playwright 100% — cookie auth e2e, refactored MenuSection / SettingsSection render and operate, logout flow, customer-open, kitchen PIN gate.
+- No critical/minor issues. Older iter2/4/5/6/7/9/11/12/test_tabletap_api are stale (predate iter13 auth lock & current pricing) — not regressions.
+
 
 - (Optional) Allow `PUT /api/settings` to clear `gst_rate` when explicit `null` is sent (iter-3 carryover).
 - (Refactor) Split `server.py` (~765 lines) into `routers/{auth,menu,orders,stats,subscription}.py`.
