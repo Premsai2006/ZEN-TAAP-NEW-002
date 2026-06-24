@@ -1,9 +1,90 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChefHat, ArrowLeft, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck } from "lucide-react";
+import { ChefHat, ArrowLeft, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
+
+const KITCHEN_TOKEN_KEY = "kitchen_token";
+
+function KitchenPinGate({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [show, setShow] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!pin) return toast.error("Enter the Kitchen PIN");
+    setLoading(true);
+    try {
+      const { data } = await api.post("/auth/kitchen-login", { pin });
+      localStorage.setItem(KITCHEN_TOKEN_KEY, data.token);
+      onUnlock();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Incorrect PIN");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="pin-gate-shell" data-testid="kitchen-pin-gate">
+      <form className="pin-gate-card" onSubmit={submit}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+          <div className="brand-logo-wrap">
+            <img src="/logo.png" alt="ZenTaap" style={{ height: 42 }} />
+          </div>
+        </div>
+        <div
+          style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+            color: "var(--gold)", fontSize: 12, fontWeight: 700,
+            background: "rgba(232,125,47,0.10)", border: "1px solid rgba(232,125,47,0.35)",
+            borderRadius: 999, padding: "4px 12px", marginBottom: 14,
+          }}
+        >
+          <Lock size={11} /> KITCHEN ACCESS
+        </div>
+        <div className="font-serif" style={{ fontSize: 24, marginBottom: 6 }}>
+          Enter Kitchen PIN
+        </div>
+        <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22 }}>
+          Ask your manager for the kitchen PIN — set under <b>Manager → Settings → Kitchen Display PIN</b>.
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 16 }}>
+          <div style={{ position: "relative" }}>
+            <input
+              type={show ? "text" : "password"}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              maxLength={6}
+              autoFocus
+              data-testid="kitchen-pin-input"
+              style={{ fontSize: 22, letterSpacing: 8, textAlign: "center", padding: "14px 44px 14px 12px", width: "100%", background: "var(--bg)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8, outline: "none" }}
+            />
+            <button
+              type="button"
+              onClick={() => setShow((v) => !v)}
+              data-testid="kitchen-pin-toggle"
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 4, display: "flex" }}
+            >
+              {show ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+        <button type="submit" className="submit-btn" disabled={loading} data-testid="kitchen-pin-submit" style={{ width: "100%", padding: "14px", fontSize: 15 }}>
+          {loading ? "Verifying…" : "Unlock Display"}
+        </button>
+        <div style={{ textAlign: "center", marginTop: 18 }}>
+          <Link to="/login" style={{ color: "var(--muted)", fontSize: 12 }} data-testid="kitchen-pin-back">← Back to Login</Link>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 const ACTIVE = ["new", "cooking", "done"];
 
@@ -29,11 +110,13 @@ const isToday = (iso) => {
 };
 
 export default function Kitchen() {
+  const [authed, setAuthed] = useState(!!localStorage.getItem(KITCHEN_TOKEN_KEY));
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("active");
   const [refreshing, setRefreshing] = useState(false);
 
-  const refresh = async (manual = false) => {
+  const refresh = useCallback(async (manual = false) => {
+    if (!authed) return;
     if (manual) setRefreshing(true);
     try {
       const { data } = await api.get("/orders");
@@ -44,14 +127,14 @@ export default function Kitchen() {
     } finally {
       if (manual) setTimeout(() => setRefreshing(false), 350);
     }
-  };
+  }, [authed]);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    if (authed) refresh();
+  }, [authed, refresh]);
 
   // Auto-refresh every 1 second
-  useInterval(() => refresh(false), 1000);
+  useInterval(() => { if (authed) refresh(false); }, 1000);
 
   // Stats: count by status; "delivered" only counts today's
   const stats = useMemo(() => {
@@ -82,6 +165,8 @@ export default function Kitchen() {
     filter === "active"
       ? orders.filter((o) => ACTIVE.includes(o.status))
       : orders.filter((o) => o.status === filter);
+
+  if (!authed) return <KitchenPinGate onUnlock={() => setAuthed(true)} />;
 
   return (
     <div className="kitchen-shell" data-testid="kitchen-page">

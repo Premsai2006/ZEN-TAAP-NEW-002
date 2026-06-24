@@ -85,8 +85,10 @@ class RestaurantSettings(BaseModel):
     trial_end: Optional[str] = None
     autopay: bool = True
     payment_method: Optional[str] = None  # "card" | "upi" | "netbanking"
-    # Customer PIN (4–6 digits) — separate from manager PIN. Default "1234".
-    customer_pin: str = "1234"
+    # Customer PIN (deprecated — kept for backward-compat with old DBs). Customer ordering is now open.
+    customer_pin: str = ""
+    # Kitchen Display PIN (4–6 digits) — required to open /kitchen on staff devices.
+    kitchen_pin: str = ""
 
 
 class SettingsUpdate(BaseModel):
@@ -102,6 +104,14 @@ class SettingsUpdate(BaseModel):
 
 class CustomerPinUpdate(BaseModel):
     new_pin: str
+
+
+class KitchenPinUpdate(BaseModel):
+    new_pin: str
+
+
+class KitchenLoginBody(BaseModel):
+    pin: str
 
 
 class CustomerLoginBody(BaseModel):
@@ -245,6 +255,27 @@ MAX_DEVICES = 4
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 
 
+async def _require_manager(request: Request):
+    """Bearer-token guard for manager-only endpoints.
+    Reads `Authorization: Bearer <token>` and validates against db.sessions.
+    Touches last_used so the LRU eviction (4-device cap) tracks real activity."""
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing manager token")
+    token = auth.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing manager token")
+    sess = await db.sessions.find_one({"scope": "manager", "token": token})
+    if not sess:
+        raise HTTPException(status_code=401, detail="Session expired — please log in again")
+    # Touch last_used
+    await db.sessions.update_one(
+        {"_id": sess["_id"]},
+        {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},
+    )
+    return sess
+
+
 async def _has_active_subscription() -> bool:
     """Returns True only when the restaurant has an active or trialing subscription."""
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
@@ -324,14 +355,14 @@ async def login(req: LoginRequest):
     }
 
 
-@api_router.get("/auth/sessions")
+@api_router.get("/auth/sessions", dependencies=[Depends(_require_manager)])
 async def list_sessions():
     docs = await db.sessions.find({"scope": "manager"}, {"_id": 0, "token": 0}).to_list(50)
     docs.sort(key=lambda s: s.get("last_used") or s.get("created_at") or "", reverse=True)
     return {"sessions": docs, "max_devices": MAX_DEVICES, "active": len(docs)}
 
 
-@api_router.delete("/auth/sessions/{device_id}")
+@api_router.delete("/auth/sessions/{device_id}", dependencies=[Depends(_require_manager)])
 async def revoke_session(device_id: str):
     r = await db.sessions.delete_one({"scope": "manager", "device_id": device_id})
     if r.deleted_count == 0:
@@ -439,29 +470,38 @@ def _validate_customer_pin(pin: str):
         raise HTTPException(status_code=400, detail="Customer PIN must be 4–6 digits")
 
 
-@api_router.post("/auth/customer-login")
-async def customer_login(body: CustomerLoginBody):
+# ---------- Kitchen PIN (separate from Manager + Customer is now open) ----------
+@api_router.post("/auth/kitchen-login")
+async def kitchen_login(body: KitchenLoginBody):
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
-    expected = doc.get("customer_pin", "1234")
+    expected = doc.get("kitchen_pin") or ""
+    if not expected:
+        raise HTTPException(status_code=404, detail="Kitchen PIN not set yet. Ask your manager to configure it.")
     if body.pin != expected:
-        raise HTTPException(status_code=401, detail="Incorrect PIN")
-    return {"success": True, "token": f"cust-{uuid.uuid4()}"}
+        raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN")
+    return {"success": True, "token": f"kitchen-{uuid.uuid4()}"}
 
 
-@api_router.put("/settings/customer-pin")
-async def update_customer_pin(body: CustomerPinUpdate):
-    _validate_customer_pin(body.new_pin)
+@api_router.put("/settings/kitchen-pin", dependencies=[Depends(_require_manager)])
+async def update_kitchen_pin(body: KitchenPinUpdate):
+    _validate_customer_pin(body.new_pin)  # same 4–6 digit rule
     await db.settings.update_one(
-        {"key": "restaurant"}, {"$set": {"customer_pin": body.new_pin}}, upsert=True
+        {"key": "restaurant"}, {"$set": {"kitchen_pin": body.new_pin}}, upsert=True
     )
     return {"success": True}
 
 
-@api_router.get("/settings/customer-pin")
-async def get_customer_pin():
-    """Manager-visible only — returns the current customer PIN so it can be displayed in Settings."""
+@api_router.get("/settings/kitchen-pin", dependencies=[Depends(_require_manager)])
+async def get_kitchen_pin():
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
-    return {"customer_pin": doc.get("customer_pin", "1234")}
+    return {"kitchen_pin": doc.get("kitchen_pin") or ""}
+
+
+@api_router.post("/auth/customer-login")
+async def customer_login(body: CustomerLoginBody):
+    # Customer access is now OPEN — no PIN required. This endpoint stays for
+    # backwards compatibility with older clients and simply succeeds.
+    return {"success": True, "token": f"cust-{uuid.uuid4()}"}
 
 
 @api_router.get("/profile")
@@ -477,7 +517,7 @@ async def get_profile():
     }
 
 
-@api_router.put("/profile")
+@api_router.put("/profile", dependencies=[Depends(_require_manager)])
 async def update_profile(body: ProfileUpdate):
     update = body.model_dump(exclude_unset=True)
     if not update:
@@ -498,7 +538,7 @@ async def list_categories():
     return cats
 
 
-@api_router.post("/categories", response_model=Category, dependencies=[Depends(_require_subscription)])
+@api_router.post("/categories", response_model=Category, dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def create_category(body: CategoryCreate):
     name = body.name.strip()
     if not name:
@@ -512,7 +552,7 @@ async def create_category(body: CategoryCreate):
     return cat
 
 
-@api_router.put("/categories/{cat_id}", response_model=Category, dependencies=[Depends(_require_subscription)])
+@api_router.put("/categories/{cat_id}", response_model=Category, dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def rename_category(cat_id: str, body: CategoryCreate):
     name = body.name.strip()
     if not name:
@@ -533,7 +573,7 @@ async def rename_category(cat_id: str, body: CategoryCreate):
     return Category(id=cat_id, name=name, slug=slug)
 
 
-@api_router.delete("/categories/{cat_id}", dependencies=[Depends(_require_subscription)])
+@api_router.delete("/categories/{cat_id}", dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def delete_category(cat_id: str):
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
     if not cat:
@@ -774,7 +814,7 @@ async def create_subscription(body: SubscribeBody):
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
-RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "https://razorpay.me/@prem9300")
+RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "")
 
 
 def _razorpay_client():
@@ -914,7 +954,7 @@ async def razorpay_webhook(request: Request):
     return {"received": True, "event": event}
 
 
-@api_router.post("/menu", response_model=MenuItem, dependencies=[Depends(_require_subscription)])
+@api_router.post("/menu", response_model=MenuItem, dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def create_menu(body: MenuItemCreate):
     payload = body.model_dump()
     if payload.get("images") is None:
@@ -926,7 +966,7 @@ async def create_menu(body: MenuItemCreate):
     return item
 
 
-@api_router.put("/menu/{item_id}", response_model=MenuItem, dependencies=[Depends(_require_subscription)])
+@api_router.put("/menu/{item_id}", response_model=MenuItem, dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def update_menu(item_id: str, body: MenuItemUpdate):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
@@ -942,7 +982,7 @@ async def update_menu(item_id: str, body: MenuItemUpdate):
     return item
 
 
-@api_router.delete("/menu/{item_id}", dependencies=[Depends(_require_subscription)])
+@api_router.delete("/menu/{item_id}", dependencies=[Depends(_require_manager), Depends(_require_subscription)])
 async def delete_menu(item_id: str):
     res = await db.menu_items.delete_one({"id": item_id})
     if res.deleted_count == 0:
@@ -977,7 +1017,7 @@ async def update_order(order_id: str, body: OrderUpdate):
 
 
 # ---------- Stats ----------
-@api_router.get("/stats/today")
+@api_router.get("/stats/today", dependencies=[Depends(_require_manager)])
 async def stats_today():
     from datetime import timedelta
     today = datetime.now(timezone.utc).date()
@@ -1080,7 +1120,7 @@ async def stats_today():
     }
 
 
-@api_router.get("/stats/revenue")
+@api_router.get("/stats/revenue", dependencies=[Depends(_require_manager)])
 async def stats_revenue(period: str = "week"):
     """Returns time-series revenue for charts. period in {today, yesterday, week, total}."""
     from datetime import timedelta
@@ -1171,10 +1211,24 @@ async def root():
 
 app.include_router(api_router)
 
+# --- CORS ---
+# In production, CORS_ORIGINS must be a comma-separated list of explicit allowed origins
+# (e.g. "https://app.zentaap.in,https://www.zentaap.in"). The dev preview still allows '*'
+# when DEMO_MODE=true so local browser tests keep working.
+_raw_origins = os.environ.get("CORS_ORIGINS", "*")
+_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+# Reject wildcard in production: if DEMO_MODE is off AND a wildcard is configured, fail closed
+# with localhost-only so the deploy operator notices and sets explicit origins.
+if not DEMO_MODE and "*" in _origins:
+    _origins = ["http://localhost:3000"]
+    logging.getLogger(__name__).warning(
+        "CORS_ORIGINS contained '*' in non-demo mode — restricted to localhost. "
+        "Set CORS_ORIGINS to your real frontend origin(s) for production."
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

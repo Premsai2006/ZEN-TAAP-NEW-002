@@ -1,136 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ShoppingCart, Plus, Minus, X, Eye, EyeOff, Lock } from "lucide-react";
+import { ShoppingCart, Plus, Minus, X, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
-
-const CUSTOMER_TOKEN_KEY = "tt_customer_token";
-
-function CustomerPinGate({ onUnlock }) {
-  const [pin, setPin] = useState("");
-  const [show, setShow] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!pin) return toast.error("Enter the customer PIN");
-    setLoading(true);
-    try {
-      const { data } = await api.post("/auth/customer-login", { pin });
-      localStorage.setItem(CUSTOMER_TOKEN_KEY, data.token);
-      onUnlock();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Incorrect PIN");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="pin-gate-shell" data-testid="customer-pin-gate">
-      <form className="pin-gate-card" onSubmit={submit}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
-          <div className="brand-logo-wrap">
-            <img src="/logo.png" alt="ZenTaap" style={{ height: 42 }} />
-          </div>
-        </div>
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            color: "var(--gold)",
-            fontSize: 12,
-            fontWeight: 700,
-            background: "rgba(232,125,47,0.10)",
-            border: "1px solid rgba(232,125,47,0.35)",
-            borderRadius: 999,
-            padding: "4px 12px",
-            marginBottom: 14,
-          }}
-        >
-          <Lock size={11} /> CUSTOMER ACCESS
-        </div>
-        <div className="font-serif" style={{ fontSize: 24, marginBottom: 6 }}>
-          Enter Customer PIN
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22 }}>
-          4–6 digit PIN. Ask your server if you don&apos;t know it.
-        </div>
-
-        <div className="form-group" style={{ marginBottom: 16 }}>
-          <div style={{ position: "relative" }}>
-            <input
-              type={show ? "text" : "password"}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-              maxLength={6}
-              autoFocus
-              data-testid="customer-pin-input"
-              style={{
-                fontSize: 22,
-                letterSpacing: 8,
-                textAlign: "center",
-                padding: "14px 44px 14px 12px",
-                width: "100%",
-                background: "var(--bg)",
-                border: "1px solid var(--line)",
-                color: "var(--text)",
-                borderRadius: 8,
-                outline: "none",
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShow((v) => !v)}
-              data-testid="customer-pin-toggle"
-              style={{
-                position: "absolute",
-                right: 10,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "transparent",
-                border: "none",
-                color: "var(--muted)",
-                cursor: "pointer",
-                padding: 4,
-                display: "flex",
-              }}
-            >
-              {show ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          className="submit-btn"
-          disabled={loading}
-          data-testid="customer-pin-submit"
-          style={{ width: "100%", padding: "14px", fontSize: 15 }}
-        >
-          {loading ? "Verifying…" : "Unlock Menu"}
-        </button>
-
-        <div style={{ textAlign: "center", marginTop: 18 }}>
-          <button
-            type="button"
-            onClick={() => navigate("/login")}
-            style={{ background: "transparent", border: "none", color: "var(--muted)", fontSize: 12, cursor: "pointer" }}
-            data-testid="customer-pin-back"
-          >
-            ← Back to Login
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing }) {
   const total = cart.reduce((sum, l) => sum + l.qty * l.price, 0);
@@ -258,7 +130,6 @@ function OrderSuccessOverlay({ tableNum, orderNumber, onDone }) {
 }
 
 export default function Customer() {
-  const [authed, setAuthed] = useState(!!localStorage.getItem(CUSTOMER_TOKEN_KEY));
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
   const [activeCat, setActiveCat] = useState("all");
@@ -289,15 +160,10 @@ export default function Customer() {
     }
   };
 
-  useEffect(() => {
-    if (authed) refresh();
-  }, [authed]);
+  useEffect(() => { refresh(); }, []);
 
-  useInterval(() => {
-    if (authed) refresh();
-  }, 2000);
+  useInterval(() => refresh(), 2000);
 
-  if (!authed) return <CustomerPinGate onUnlock={() => setAuthed(true)} />;
 
   const filtered = activeCat === "all" ? menu : menu.filter((m) => m.category === activeCat);
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);

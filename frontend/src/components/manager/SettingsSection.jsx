@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { ImageIcon, Save, KeyRound, Sun, Moon, Phone, Users, Eye, EyeOff, Smartphone, LogOut as LogOutIcon } from "lucide-react";
+import { ImageIcon, Save, KeyRound, Sun, Moon, Phone, ChefHat, Eye, EyeOff, Smartphone, LogOut as LogOutIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { getTheme, setTheme as applyTheme } from "@/lib/theme";
 
@@ -123,38 +123,38 @@ export default function SettingsSection({ settings, onRefresh }) {
   const [recNewPin, setRecNewPin] = useState("");
   const [recSaving, setRecSaving] = useState(false);
 
-  // Customer PIN management (separate from manager PIN)
-  const [customerPin, setCustomerPin] = useState("");
-  const [newCustomerPin, setNewCustomerPin] = useState("");
-  const [showCustPin, setShowCustPin] = useState(false);
-  const [custPinSaving, setCustPinSaving] = useState(false);
+  // Kitchen PIN management (separate from manager PIN)
+  const [kitchenPin, setKitchenPin] = useState("");
+  const [newKitchenPin, setNewKitchenPin] = useState("");
+  const [showKitchenPin, setShowKitchenPin] = useState(false);
+  const [kitchenPinSaving, setKitchenPinSaving] = useState(false);
 
-  const loadCustomerPin = () => {
+  const loadKitchenPin = () => {
     api
-      .get("/settings/customer-pin")
-      .then((r) => setCustomerPin(r.data.customer_pin || ""))
+      .get("/settings/kitchen-pin")
+      .then((r) => setKitchenPin(r.data.customer_pin || ""))
       .catch(() => {});
   };
 
   useEffect(() => {
-    loadCustomerPin();
+    loadKitchenPin();
   }, []);
 
-  const submitCustomerPin = async (e) => {
+  const submitKitchenPin = async (e) => {
     e.preventDefault();
-    if (!newCustomerPin) return toast.error("Enter a new Customer PIN");
-    if (newCustomerPin.length < 4 || newCustomerPin.length > 6)
-      return toast.error("Customer PIN must be 4–6 digits");
-    setCustPinSaving(true);
+    if (!newKitchenPin) return toast.error("Enter a new Kitchen PIN");
+    if (newKitchenPin.length < 4 || newKitchenPin.length > 6)
+      return toast.error("Kitchen PIN must be 4–6 digits");
+    setKitchenPinSaving(true);
     try {
-      await api.put("/settings/customer-pin", { new_pin: newCustomerPin });
-      toast.success("Customer PIN updated");
-      setCustomerPin(newCustomerPin);
-      setNewCustomerPin("");
+      await api.put("/settings/kitchen-pin", { new_pin: newKitchenPin });
+      toast.success("Kitchen PIN updated");
+      setKitchenPin(newKitchenPin);
+      setNewKitchenPin("");
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to update");
     } finally {
-      setCustPinSaving(false);
+      setKitchenPinSaving(false);
     }
   };
 
@@ -486,32 +486,32 @@ export default function SettingsSection({ settings, onRefresh }) {
         </button>
       </form>
 
-      {/* Customer PIN management — separate PIN customers use to access /customer */}
-      <form className="add-item-card" onSubmit={submitCustomerPin} data-testid="customer-pin-form">
+      {/* Kitchen PIN management — separate PIN customers use to access /customer */}
+      <form className="add-item-card" onSubmit={submitKitchenPin} data-testid="kitchen-pin-form">
         <div className="font-serif" style={{ fontSize: 18, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-          <Users size={16} color="var(--gold)" />
-          Customer Menu PIN
+          <ChefHat size={16} color="var(--gold)" />
+          Kitchen Display PIN
         </div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>
-          Customers need this 4–6 digit PIN to view the menu at <b>/customer</b>. This is independent of your Manager PIN — share it with guests at the table.
+          Kitchen staff need this 4–6 digit PIN to open the kitchen display at <b>/kitchen</b>. This is independent of your Manager PIN — share it with guests at the table.
         </div>
 
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Current Customer PIN</label>
+            <label className="form-label">Current Kitchen PIN</label>
             <div style={{ position: "relative" }}>
               <input
-                type={showCustPin ? "text" : "password"}
-                value={customerPin}
+                type={showKitchenPin ? "text" : "password"}
+                value={kitchenPin}
                 readOnly
-                data-testid="current-customer-pin"
+                data-testid="current-kitchen-pin"
                 style={{ letterSpacing: 6, textAlign: "center", paddingRight: 38, background: "var(--bg)" }}
               />
               <button
                 type="button"
-                onClick={() => setShowCustPin((v) => !v)}
-                data-testid="customer-pin-toggle"
-                title={showCustPin ? "Hide" : "Show"}
+                onClick={() => setShowKitchenPin((v) => !v)}
+                data-testid="kitchen-pin-toggle"
+                title={showKitchenPin ? "Hide" : "Show"}
                 style={{
                   position: "absolute",
                   right: 8,
@@ -525,27 +525,27 @@ export default function SettingsSection({ settings, onRefresh }) {
                   display: "flex",
                 }}
               >
-                {showCustPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showKitchenPin ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">New Customer PIN (4–6 digits)</label>
+            <label className="form-label">New Kitchen PIN (4–6 digits)</label>
             <input
               type="password"
               inputMode="numeric"
-              value={newCustomerPin}
-              onChange={(e) => setNewCustomerPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              value={newKitchenPin}
+              onChange={(e) => setNewKitchenPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
               placeholder="e.g. 4321"
-              data-testid="new-customer-pin"
+              data-testid="new-kitchen-pin"
               style={{ letterSpacing: 6, textAlign: "center" }}
             />
           </div>
         </div>
-        <button type="submit" className="submit-btn" disabled={custPinSaving} data-testid="save-customer-pin-btn">
+        <button type="submit" className="submit-btn" disabled={kitchenPinSaving} data-testid="save-kitchen-pin-btn">
           <Save size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-          {custPinSaving ? "Saving…" : "Update Customer PIN"}
+          {kitchenPinSaving ? "Saving…" : "Update Kitchen PIN"}
         </button>
       </form>
 

@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 13 — PRODUCTION HARDENING tested end-to-end. Backend pytest /app/backend/tests/test_iteration13.py: 16 PASS / 1 SKIP / 1 FAIL. Frontend Playwright on desktop 1920x1080 verified Customer (no PIN gate, Table 7 lock badge), Kitchen (PIN gate + all 4 testids + wrong/correct PIN flow), and Manager Settings (kitchen-pin-form present, customer-pin-form absent, 'Kitchen Display PIN' label visible, mgr_token persisted in localStorage). One CRITICAL backend bug found: PUT /api/settings is OPEN — it accepts updates WITHOUT an Authorization header (HTTP 200), violating the production-hardening spec which says it must require manager Bearer token. All other gated endpoints (PUT /profile, GET /stats/today, GET /stats/revenue, GET /auth/sessions, PUT /settings/kitchen-pin, POST/PUT/DELETE on /menu and /categories) correctly return 401 without token and succeed with valid token. POST /orders correctly does NOT require manager token (customer-open flow). GET /orders is open (200) — kitchen+customer flow. Kitchen-PIN endpoints work end-to-end: 404 when unset, set via manager-authed PUT, correct PIN -> token, wrong PIN -> 401. GET /api/payments/config returns key_id='', configured=false, fallback_link='' (no hardcoded razorpay.me). GET /api/pricing?tables=20 returns 1888.0. DEMO_MODE=true env confirmed via demo_otp present in /auth/request-otp response.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PUT /api/settings",
+        "issue": "OPEN endpoint — accepts updates without Authorization header (returns 200). Spec requires manager Bearer token. The route definition at server.py:609 is missing `dependencies=[Depends(_require_manager)]`. Anyone with the public URL can mutate restaurant_name, logo_url, gst_number, phone, address, etc. Verified by sending `PUT /api/settings {restaurant_name:'X'}` with NO auth header — it returned 200 + persisted the change.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration13.py",
+    "/app/test_reports/pytest/iteration13_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Add `dependencies=[Depends(_require_manager)]` to @api_router.put('/settings') at server.py line ~609 — currently any unauthenticated caller can update restaurant settings (name, logo, GST, address, phone, printer_type, theme). One-line fix: `@api_router.put('/settings', response_model=RestaurantSettings, dependencies=[Depends(_require_manager)])`. Also update frontend Settings save UX to ensure Bearer is sent (axios interceptor already does this — should be transparent).",
+    "(Carry-over from iteration_11/12) server.py:300 _register_session docstring still says 'Enforces a 2-device cap' — stale; cap is now 4 (MAX_DEVICES=4).",
+    "(Carry-over from iteration_12) /app/frontend/src/pages/Subscribe.jsx fmtRupee: add minimumFractionDigits:2 so currency displays as ₹1,321.60 instead of ₹1,321.6.",
+    "(Style — long overdue) server.py at ~1240 lines: split into routers/{auth,subscription,payments,orders,settings}.py for maintainability."
+  ],
+  "critical_code_review_comments": [
+    "server.py — PUT /api/settings (line 609) MISSING _require_manager guard. This is a production security bug given iteration 13 explicitly hardens manager endpoints. POST/PUT/DELETE for /menu and /categories all use the dependency correctly; /settings was missed.",
+    "server.py — PUT /api/orders/{order_id} (line 1010) is gated by _require_subscription but NOT by _require_manager. Per spec this is INTENTIONAL because kitchen status updates go through this endpoint and the kitchen flow has its own PIN, but it means any subscriber's order can be marked done/delivered by anyone who knows the order_id. Document this design choice or add a kitchen-token check.",
+    "server.py — _validate_customer_pin function still exists (line 466) but customer PIN is now removed; kitchen-pin endpoints reuse it (line 487). Rename to _validate_short_pin for clarity.",
+    "server.py — RestaurantSettings model still has `customer_pin: str = ''` field (line 89). Kept for backward compat per comment — OK, but consider planning a migration removal.",
+    "server.py — DEMO_MODE check at line 255 reads env at import time only. Restart required when toggling. Fine for production but document in LAUNCH.md.",
+    "CORS hardening logic at server.py:1222-1227 correctly fails closed when DEMO_MODE=false AND '*' in CORS_ORIGINS — good. Verified the warning log emits.",
+    "frontend/src/lib/api.js — 402 interceptor uses window.location.assign (full reload) — acceptable for now."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration13.py",
+    "/app/test_reports/pytest/iteration13_results.xml",
+    "/app/test_reports/iteration_13.json",
+    "/app/memory/test_credentials.md (Kitchen PIN 5678 added; Customer PIN removed)"
+  ],
+  "success_rate": {
+    "backend": "94% (16/17 executed; 1 SKIP unreachable due to PIN already set; 1 FAIL = CRITICAL settings bug)",
+    "frontend": "100% (Customer-no-PIN ✓, Table 7 lock ✓, Kitchen PIN gate + 4 testids + wrong/correct flow ✓, Settings kitchen-pin-form ✓, customer-pin-form ABSENT ✓, mgr_token in localStorage ✓)"
+  },
+  "test_credentials": "Manager PIN 1234; Kitchen PIN 5678 (set during test, persisted in db.settings.restaurant.kitchen_pin). Phone for OTP recovery: 9876543210.",
+  "seed_data_creation": "No persistent test data left. Kitchen PIN set to 5678 (intentional — documented in test_credentials.md). One temporary PUT /api/settings call set restaurant_name to 'X' during the OPEN-endpoint bug demonstration; restored back to 'ZenTaap Restaurant' immediately afterward. No menu items, categories, or orders created (DB already empty + subscription.status=none gates writes). Session row test_it13_<uuid> may persist in db.sessions until LRU eviction — harmless.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 13 (PRODUCTION HARDENING) is 99% green. The ONE critical finding is that PUT /api/settings was NOT given the _require_manager dependency. Fix it in one line at server.py:609, then re-run /app/backend/tests/test_iteration13.py — test test_settings_put_requires_token should flip from FAIL to PASS. All other spec items verified: Customer page open (no PIN), Kitchen PIN flow end-to-end, manager Bearer auth on /profile + /stats/today + /stats/revenue + /auth/sessions + PUT /settings/kitchen-pin + POST/PUT/DELETE menu/categories, customer-open POST /orders, payments config has no hardcoded razorpay link, pricing at 20 tables = ₹1888, DEMO_MODE OTP works. Kitchen PIN currently SET to 5678. mgr_token correctly written to localStorage after login (length 40). axios Bearer interceptor working as designed (verified via /api/profile success after login).",
+  "rca of the issue": "RCA — PUT /api/settings OPEN: The route definition `@api_router.put('/settings', response_model=RestaurantSettings)` at server.py:609 was inadvertently NOT updated with `dependencies=[Depends(_require_manager)]` during the iteration 13 hardening pass. All the other manager-only mutations got the guard added (lines 358, 365, 485, 494, 520, 541, 555, 576, 957, 969, 985, 1020, 1123), but /settings PUT was missed. Reproduction: `curl -X PUT https://restaurant-ops-desk.preview.emergentagent.com/api/settings -H 'Content-Type: application/json' -d '{\"restaurant_name\":\"OWNED\"}'` — returns 200 + persists. Mitigation: add `dependencies=[Depends(_require_manager)]` to the @api_router.put('/settings', ...) decorator. The frontend axios interceptor already attaches the Bearer header for SettingsSection saves, so adding the guard is a transparent backend-only change."
+}
