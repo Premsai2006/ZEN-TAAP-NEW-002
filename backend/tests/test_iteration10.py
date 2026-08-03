@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://restaurant-ops-desk.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 
 # Load backend env to get MONGO_URL/DB_NAME
