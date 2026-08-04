@@ -191,7 +191,7 @@ export default function Signup() {
 
         <div className="form-row">
           <div className="form-group">
-            <label className="form-label">Set PIN (4–10 digits)</label>
+            <label className="form-label">Set PIN (6–10 digits)</label>
             <PinInput value={form.pin} onChange={(v) => set("pin", v)} testId="signup-pin" />
           </div>
           <div className="form-group">

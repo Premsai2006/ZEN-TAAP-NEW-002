@@ -135,8 +135,8 @@ async def create_subscription(body: SubscribeBody):
 
     if current_status in ("none", "skipped", "expired") or not current_tables:
         trial_end = now + timedelta(days=TRIAL_DAYS)
-        # Expired renewals skip trial — go active after payment; still set trial for none/skipped
-        status = "trial" if current_status in ("none", "skipped") else "trial"
+        # New signups get a trial; expired renewals go straight to active after payment
+        status = "trial" if current_status in ("none", "skipped") else "active"
         cycle_start = now
         next_cycle = cycle_start + timedelta(days=30)
         update = {
@@ -145,14 +145,15 @@ async def create_subscription(body: SubscribeBody):
             "subscription_gst": price["gst_amount"],
             "subscription_total": price["total_with_tax"],
             "subscription_status": status,
-            "trial_start": now.isoformat(),
-            "trial_end": trial_end.isoformat(),
+            "trial_start": now.isoformat() if status == "trial" else existing.get("trial_start"),
+            "trial_end": trial_end.isoformat() if status == "trial" else existing.get("trial_end"),
             "cycle_start": cycle_start.isoformat(),
             "next_cycle_start": next_cycle.isoformat(),
             "payment_method": body.payment_method,
             "pending_tables": None,
             "pending_subtotal": None,
             "pending_total": None,
+            "last_payment_at": now.isoformat(),
         }
         await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
         return {

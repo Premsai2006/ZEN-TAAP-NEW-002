@@ -1,20 +1,20 @@
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends
 from app.database import db
-from app.deps import require_manager
+from app.deps import require_manager, require_subscription
 from app.services import stats_service as stats
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 
-@router.get("/today", dependencies=[Depends(require_manager)])
+@router.get("/today", dependencies=[Depends(require_manager), Depends(require_subscription)])
 async def stats_today():
     today = datetime.now(timezone.utc).date()
     orders = await stats.fetch_orders_for_period("today")
     return await stats.build_stats_payload(orders, today)
 
 
-@router.get("/summary", dependencies=[Depends(require_manager)])
+@router.get("/summary", dependencies=[Depends(require_manager), Depends(require_subscription)])
 async def stats_summary(period: str = "today"):
     """Period-aware stats for Sales dashboard. period in {today, yesterday, week, total}."""
     if period not in ("today", "yesterday", "week", "total"):
@@ -26,7 +26,7 @@ async def stats_summary(period: str = "today"):
     return payload
 
 
-@router.get("/revenue", dependencies=[Depends(require_manager)])
+@router.get("/revenue", dependencies=[Depends(require_manager), Depends(require_subscription)])
 async def stats_revenue(period: str = "week"):
     now = datetime.now(timezone.utc)
     today = now.date()

@@ -280,8 +280,8 @@ export default function Kitchen() {
                   </li>
                 ))}
               </ul>
-              {nxt && (
-                <div className="ticket-actions">
+              <div className="ticket-actions">
+                {nxt ? (
                   <button
                     className="submit-btn"
                     onClick={() => advance(o)}
@@ -289,8 +289,12 @@ export default function Kitchen() {
                   >
                     → Mark {nxt}
                   </button>
-                </div>
-              )}
+                ) : (
+                  <div className="ticket-status-done" data-testid={`ticket-final-${o.order_number}`}>
+                    {o.status === "delivered" ? "Delivered" : "Ready"}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}

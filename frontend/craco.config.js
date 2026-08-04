@@ -1,6 +1,7 @@
 // craco.config.js
 const path = require("path");
-require("dotenv").config();
+require("dotenv").config({ path: path.resolve(__dirname, ".env.dev") });
+require("dotenv").config({ path: path.resolve(__dirname, ".env"), override: true });
 
 // Environment variable overrides
 const config = {

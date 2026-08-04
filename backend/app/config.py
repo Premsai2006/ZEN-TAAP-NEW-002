@@ -3,7 +3,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT_DIR / ".env")
+# Dev defaults from .env.dev; local .env overrides when present
+load_dotenv(ROOT_DIR / ".env.dev")
+load_dotenv(ROOT_DIR / ".env", override=True)
 
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
@@ -30,7 +32,7 @@ TRIAL_DAYS = 4
 # Auth lockout
 MAX_PIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
-# PIN length: 4–10 digits (frontend encourages 6+ for new accounts).
-PIN_MIN_NEW = 4
+# PIN length: new PINs 6–10; legacy logins still accept 4–10.
+PIN_MIN_NEW = 6
 PIN_MAX = 10
 PIN_MIN_LEGACY = 4

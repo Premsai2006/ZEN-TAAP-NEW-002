@@ -144,7 +144,7 @@ export default function ForgotPinDialog({ open, onClose }) {
                 inputMode="numeric"
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, ""))}
-                placeholder="4–10 digits"
+                placeholder="6–10 digits"
                 data-testid="forgot-newpin-input"
               />
             </div>

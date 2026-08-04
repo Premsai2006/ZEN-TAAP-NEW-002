@@ -212,9 +212,9 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                       <div style={{ fontSize: 11, opacity: 0.75 }}>{t.relative}</div>
                     </td>
                     <td>{statusBadge(o.status)}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {nxt && (
+                    <td className="order-action-cell">
+                      <div className="order-actions">
+                        {nxt ? (
                           <button
                             className="mini-btn"
                             onClick={() => updateOrder(o.id, nxt)}
@@ -223,12 +223,21 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                           >
                             → {nxt}
                           </button>
+                        ) : (
+                          <span className="order-action-spacer" aria-hidden="true" />
                         )}
                         <button
                           className="mini-btn primary"
-                          onClick={() => setBillOrder(o)}
+                          onClick={() => {
+                            if (locked) {
+                              toast.error("Subscribe to ZenTaap to generate bills.");
+                              return;
+                            }
+                            setBillOrder(o);
+                          }}
                           data-testid={`generate-bill-${o.order_number}`}
-                          title="Generate Bill"
+                          title={locked ? "Requires subscription" : "Generate Bill"}
+                          disabled={locked}
                         >
                           <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
                           Bill

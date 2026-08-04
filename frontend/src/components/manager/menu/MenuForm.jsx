@@ -4,7 +4,7 @@ import { ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 
 const MAX_IMAGES = 4;
-const initialForm = { name: "", price: "", category: "", images: [] };
+const initialForm = { name: "", price: "", cost_price: "", category: "", images: [] };
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -24,6 +24,7 @@ export const useMenuForm = () => {
     setForm({
       name: it.name,
       price: it.price,
+      cost_price: it.cost_price ?? "",
       category: it.category || "",
       images: it.images && it.images.length ? it.images : it.image_url ? [it.image_url] : [],
     });
@@ -72,6 +73,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
     const payload = {
       name: form.name.trim(),
       price: parseFloat(form.price),
+      cost_price: form.cost_price === "" || form.cost_price == null ? null : parseFloat(form.cost_price),
       category: form.category || "",
       images: form.images,
       image_url: form.images[0] || "",
@@ -144,6 +146,18 @@ export default function MenuForm({ formState, categories, onRefresh }) {
           <div className="form-group">
             <label className="form-label">Price (₹)</label>
             <input type="number" value={form.price} onChange={(e) => set("price", e.target.value)} placeholder="e.g. 280" data-testid="item-price-input" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cost / COGS (₹) — optional</label>
+            <input
+              type="number"
+              value={form.cost_price}
+              onChange={(e) => set("cost_price", e.target.value)}
+              placeholder="e.g. 110"
+              data-testid="item-cost-input"
+              min="0"
+              step="0.01"
+            />
           </div>
         </div>
 

@@ -50,12 +50,17 @@ const buildXLabels = (period, series) => {
   return series.map((p) => ({ ...p, x: p.label }));
 };
 
-export default function SalesSection({ stats: todayStats, showRevenue, setShowRevenue, onLogoutClick }) {
+export default function SalesSection({ stats: todayStats, showRevenue, setShowRevenue, onLogoutClick, locked }) {
   const [period, setPeriod] = useState("week");
   const [series, setSeries] = useState([]);
   const [stats, setStats] = useState(todayStats);
 
   useEffect(() => {
+    if (locked) {
+      setSeries([]);
+      setStats(null);
+      return;
+    }
     api
       .get(`/stats/revenue?period=${period}`)
       .then((r) => setSeries(r.data.series || []))
@@ -65,7 +70,7 @@ export default function SalesSection({ stats: todayStats, showRevenue, setShowRe
       .get(`/stats/summary?period=${period}`)
       .then((r) => setStats(r.data))
       .catch(() => setStats(todayStats));
-  }, [period, todayStats]);
+  }, [period, todayStats, locked]);
 
   const fmt = (v) => (showRevenue ? `₹${(v ?? 0).toLocaleString("en-IN")}` : `₹${maskRev(v ?? 0)}`);
   const pieData = (stats?.revenue_by_category || []).map((c) => ({
@@ -79,6 +84,13 @@ export default function SalesSection({ stats: todayStats, showRevenue, setShowRe
 
   return (
     <div className="section active" data-testid="sales-section">
+      {locked && (
+        <div className="explore-banner" data-testid="sales-locked-banner" style={{ marginBottom: 16 }}>
+          <div className="explore-banner-text">
+            <b>Sales analytics locked</b> — subscribe to ZenTaap to view revenue, charts, and gross profit.
+          </div>
+        </div>
+      )}
       {/* 4 stat cards with growth pills */}
       <div className="stats-row">
         <div className="stat-card gold">

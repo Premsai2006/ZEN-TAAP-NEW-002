@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight, Menu, X, CreditCard } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useInterval } from "@/hooks/useInterval";
 import OrdersSection from "@/components/manager/OrdersSection";
@@ -55,24 +56,29 @@ export default function Manager() {
         setSubscription(sub.data);
         return;
       }
-      const [o, m, c, s, st, sub] = await Promise.all([
+      const hasAccess = !subscription || ["trial", "active"].includes(subscription.status);
+      // allSettled so a 402 on gated stats doesn't blank the dashboard (issue #7)
+      const results = await Promise.allSettled([
         api.get("/orders"),
         api.get("/menu"),
         api.get("/categories"),
-        api.get("/stats/today"),
+        hasAccess ? api.get("/stats/today") : Promise.resolve({ data: null }),
         api.get("/settings"),
         api.get("/subscription"),
       ]);
-      setOrders(o.data);
-      setMenu(m.data);
-      setCategories(c.data);
-      setStats(s.data);
-      setSettings(st.data);
-      setSubscription(sub.data);
+      const val = (i) => (results[i].status === "fulfilled" ? results[i].value.data : undefined);
+      if (val(0) !== undefined) setOrders(val(0));
+      if (val(1) !== undefined) setMenu(val(1));
+      if (val(2) !== undefined) setCategories(val(2));
+      if (hasAccess && val(3) !== undefined) setStats(val(3));
+      else if (!hasAccess) setStats(null);
+      if (val(4) !== undefined) setSettings(val(4));
+      if (val(5) !== undefined) setSubscription(val(5));
     } catch (err) {
       console.warn("Manager.refresh failed:", err?.response?.status, err?.message);
     }
-  }, [active]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only subscription.status gates stats fetch
+  }, [active, subscription?.status]);
 
   useEffect(() => {
     refresh();
@@ -149,6 +155,12 @@ export default function Manager() {
                 key={n.key}
                 className={`nav-link ${active === n.key ? "active" : ""} ${isLocked ? "locked" : ""}`}
                 onClick={() => {
+                  if (isLocked) {
+                    toast.message(`${n.label} needs an active subscription to use.`, {
+                      description: "You can browse; writes stay locked until you subscribe.",
+                      id: `locked-${n.key}`,
+                    });
+                  }
                   setActive(n.key);
                   setMobileNav(false);
                 }}
@@ -256,6 +268,7 @@ export default function Manager() {
             showRevenue={showRevenue}
             setShowRevenue={setShowRevenuePersist}
             onLogoutClick={() => setShowLogout(true)}
+            locked={locked}
           />
         )}
         {active === "profile" && <ProfileSection onRefresh={refresh} />}

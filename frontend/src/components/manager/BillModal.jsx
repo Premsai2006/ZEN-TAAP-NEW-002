@@ -61,7 +61,7 @@ export default function BillModal({ order, settings, onClose }) {
 
   return (
     <div
-      className="no-print"
+      className="bill-modal-overlay"
       onClick={onClose}
       data-testid="bill-modal"
       style={{
@@ -76,6 +76,7 @@ export default function BillModal({ order, settings, onClose }) {
       }}
     >
       <div
+        className="bill-modal-card"
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "var(--card)",
@@ -88,7 +89,10 @@ export default function BillModal({ order, settings, onClose }) {
           overflowY: "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div
+          className="no-print"
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}
+        >
           <div className="font-serif" style={{ fontSize: 18, color: "var(--gold)" }}>
             Bill Preview
           </div>
@@ -102,7 +106,7 @@ export default function BillModal({ order, settings, onClose }) {
           </button>
         </div>
 
-        {/* Printable area */}
+        {/* Printable area — must NOT sit under a .no-print ancestor or print is blank */}
         <div
           className="bill-print"
           style={{
