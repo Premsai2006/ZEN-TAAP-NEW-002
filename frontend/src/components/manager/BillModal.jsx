@@ -6,16 +6,17 @@ export default function BillModal({ order, settings, onClose }) {
   const [showWa, setShowWa] = useState(false);
   if (!order) return null;
   const s = settings || {};
-  const subtotal = order.amount;
+  const items = Array.isArray(order.items) ? order.items : [];
+  const subtotal = Number(order.amount ?? items.reduce((sum, it) => sum + (it.qty || 0) * (it.price || 0), 0)) || 0;
   const gstRate = (s.gst_rate ?? 0) / 100;
   const cgst = +(subtotal * gstRate / 2).toFixed(2);
   const sgst = +(subtotal * gstRate / 2).toFixed(2);
   const total = +(subtotal + cgst + sgst).toFixed(2);
-  const billNo = `B-${order.order_number}`;
-  const dateStr = new Date(order.created_at).toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  const billNo = `B-${order.order_number ?? "?"}`;
+  const tableText = order.table === 0 || order.table == null ? "Walk-in" : `Table ${order.table}`;
+  const dateStr = order.created_at
+    ? new Date(order.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
 
   const handlePrint = () => {
     window.print();
@@ -28,11 +29,11 @@ export default function BillModal({ order, settings, onClose }) {
     if (s.phone) lines.push(`Ph: ${s.phone}`);
     if (s.gst_number) lines.push(`GSTIN: ${s.gst_number}`);
     lines.push(`-------------------------`);
-    lines.push(`Bill #${billNo}  |  Table ${order.table}`);
+    lines.push(`Bill #${billNo}  |  ${tableText}`);
     lines.push(dateStr);
     lines.push(`-------------------------`);
-    for (const it of order.items) {
-      lines.push(`${it.name} x${it.qty}  ₹${(it.qty * it.price).toFixed(2)}`);
+    for (const it of items) {
+      lines.push(`${it.name} x${it.qty}  ₹${((it.qty || 0) * (it.price || 0)).toFixed(2)}`);
     }
     lines.push(`-------------------------`);
     lines.push(`Subtotal: ₹${subtotal.toFixed(2)}`);
@@ -144,7 +145,7 @@ export default function BillModal({ order, settings, onClose }) {
           <div className="b-line" style={{ borderTop: "1px dashed #000", margin: "8px 0" }} />
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
             <span>Bill #{billNo}</span>
-            <span>Table {order.table}</span>
+            <span>{tableText}</span>
           </div>
           <div style={{ fontSize: 11, marginBottom: 4 }}>{dateStr}</div>
           <div className="b-line" style={{ borderTop: "1px dashed #000", margin: "8px 0" }} />
@@ -158,12 +159,12 @@ export default function BillModal({ order, settings, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {order.items.map((it, i) => (
+              {items.map((it, i) => (
                 <tr key={`${it.name}-${i}`}>
                   <td style={{ padding: "2px 0", fontSize: 12, color: "#000", border: "none" }}>{it.name}</td>
                   <td style={{ padding: "2px 0", textAlign: "right", fontSize: 12, color: "#000", border: "none" }}>{it.qty}</td>
                   <td style={{ padding: "2px 0", textAlign: "right", fontSize: 12, color: "#000", border: "none" }}>
-                    ₹{(it.qty * it.price).toFixed(2)}
+                    ₹{((it.qty || 0) * (it.price || 0)).toFixed(2)}
                   </td>
                 </tr>
               ))}

@@ -12,7 +12,7 @@ export default function ChangePinForm() {
   const submit = async (e) => {
     e.preventDefault();
     if (!oldPin || !newPin) return toast.error("Fill both PIN fields");
-    if (newPin.length < 4) return toast.error("New PIN must be 4–10 digits");
+    if (newPin.length < 6) return toast.error("New PIN must be at least 6 digits");
     if (newPin !== confirmPin) return toast.error("PINs do not match");
     setSaving(true);
     try {
@@ -29,7 +29,7 @@ export default function ChangePinForm() {
   return (
     <form className="add-item-card" onSubmit={submit}>
       <div className="font-serif" style={{ fontSize: 18, marginBottom: 6 }}>Change PIN</div>
-      <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>Set a new numeric PIN (4–10 digits).</div>
+      <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>Set a new numeric PIN (6–10 digits recommended).</div>
       <div className="form-row">
         <div className="form-group">
           <label className="form-label">Current PIN</label>

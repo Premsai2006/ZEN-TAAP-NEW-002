@@ -12,7 +12,11 @@ export default function DevicesCard() {
   const load = async () => {
     try {
       const { data } = await api.get("/auth/sessions");
-      setSessions(data.sessions || []);
+      setSessions(
+        (data.sessions || []).filter(
+          (s, i, arr) => arr.findIndex((x) => x.device_id === s.device_id) === i
+        )
+      );
       setMax(data.max_devices || 2);
     } catch (err) {
       console.warn("sessions load failed:", err?.message);

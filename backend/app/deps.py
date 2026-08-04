@@ -1,0 +1,64 @@
+from datetime import datetime, timezone
+from fastapi import HTTPException, Request, Response, Depends
+from app.config import MGR_COOKIE, DEMO_MODE
+from app.database import db
+
+
+def extract_manager_token(request: Request) -> str:
+    cookie_token = request.cookies.get(MGR_COOKIE)
+    if cookie_token:
+        return cookie_token.strip()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return ""
+
+
+def set_manager_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=MGR_COOKIE,
+        value=token,
+        httponly=True,
+        secure=not DEMO_MODE,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 30,
+    )
+
+
+def clear_manager_cookie(response: Response) -> None:
+    response.delete_cookie(key=MGR_COOKIE, path="/")
+
+
+async def require_manager(request: Request):
+    token = extract_manager_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing manager token")
+    sess = await db.sessions.find_one({"scope": "manager", "token": token})
+    if not sess:
+        raise HTTPException(status_code=401, detail="Session expired — please log in again")
+    await db.sessions.update_one(
+        {"_id": sess["_id"]},
+        {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},
+    )
+    return sess
+
+
+async def has_active_subscription() -> bool:
+    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    status = doc.get("subscription_status", "none")
+    return status in ("trial", "active")
+
+
+async def require_subscription():
+    ok = await has_active_subscription()
+    if not ok:
+        raise HTTPException(
+            status_code=402,
+            detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
+        )
+    return True
+
+
+RequireManager = Depends(require_manager)
+RequireSubscription = Depends(require_subscription)

@@ -56,7 +56,7 @@ export default function ForgotPinDialog({ open, onClose }) {
 
   const verifyAndReset = async () => {
     if (otp.length !== 6) return toast.error("Enter the 6-digit OTP");
-    if (newPin.length < 4) return toast.error("New PIN must be 4–10 digits");
+    if (newPin.length < 6) return toast.error("New PIN must be at least 6 digits");
     if (newPin !== confirmPin) return toast.error("PINs do not match");
     setLoading(true);
     try {

@@ -81,8 +81,11 @@ export default function Signup() {
     if (!form.restaurant_name.trim()) return toast.error("Restaurant name is required");
     const digits = form.contact_number.replace(/[^0-9]/g, "");
     if (digits.length < 7) return toast.error("Enter a valid contact number");
-    if (form.pin.length < 4) return toast.error("PIN must be at least 4 digits");
+    if (form.pin.length < 6) return toast.error("PIN must be at least 6 digits");
     if (form.pin !== form.confirm_pin) return toast.error("PINs do not match");
+    if (accountExists) {
+      return toast.error("This deployment already has a restaurant. Please log in instead.");
+    }
     setLoading(true);
     try {
       const { data } = await api.post("/auth/signup", {
@@ -131,7 +134,8 @@ export default function Signup() {
               textAlign: "center",
             }}
           >
-            An account is already registered.{" "}
+            This ZenTaap deployment already has a restaurant registered.
+            Each install supports one restaurant — use a separate deployment for another venue.{" "}
             <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>Login here</a>.
           </div>
         )}

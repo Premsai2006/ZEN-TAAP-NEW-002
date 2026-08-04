@@ -58,6 +58,13 @@
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 10px !important;
   }
+  .explore-banner {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .explore-banner-cta { width: 100%; justify-content: center; }
+  .charts-row { grid-template-columns: 1fr !important; }
+  .main { overflow-x: hidden; }
   .add-item-card { padding: 16px !important; }
   .form-row { grid-template-columns: 1fr !important; }
   .menu-mgmt-grid, .menu-grid { grid-template-columns: 1fr; }
@@ -518,6 +525,20 @@ body {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 20px;
+}
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll table {
+  min-width: 640px;
+}
+.nav-link.locked {
+  opacity: 0.72;
+}
+.nav-link.locked span {
+  opacity: 0.9;
 }
 .section-header {
   display: flex; justify-content: space-between; align-items: center;

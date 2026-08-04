@@ -79,8 +79,26 @@ export default function Subscribe() {
       .catch(() => {});
   }, []);
 
-  const hasActive = existing && existing.tables && existing.status && existing.status !== "none" && existing.status !== "skipped";
+  const hasActive = existing && existing.tables && ["trial", "active"].includes(existing.status);
+  const canStartTrial = !existing || !existing.status || ["none", "skipped"].includes(existing.status);
+  const isExpired = existing?.status === "expired";
   const isChangeRequest = hasActive && tables !== existing.tables;
+
+  const effectiveFrom = useMemo(() => {
+    const raw = existing?.effective_from || existing?.next_cycle_start;
+    if (!raw) return null;
+    try {
+      const d = new Date(raw);
+      if (d.getTime() < Date.now() - 60_000) return new Date(); // treat past as now
+      return d;
+    } catch {
+      return null;
+    }
+  }, [existing]);
+
+  const fmtEffective = effectiveFrom
+    ? effectiveFrom.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : "—";
 
   const monthLabel = useMemo(
     () => new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
@@ -158,6 +176,11 @@ export default function Subscribe() {
       // 2) If we have a deferred next-cycle change, no payment is needed now.
       if (planResp.applied === "next_cycle") {
         toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
+        navigate("/manager");
+        return;
+      }
+      if (planResp.applied === "immediate" && hasActive) {
+        toast.success(`Plan updated to ${tables} tables · effective immediately.`);
         navigate("/manager");
         return;
       }
@@ -257,20 +280,52 @@ export default function Subscribe() {
           </button>
         </div>
 
-        {/* 4-day trial banner — always visible */}
-        <div className="trial-banner-highlight" data-testid="trial-banner" style={{ marginBottom: 22 }}>
-          <div className="trial-banner-icon">
-            <Gift size={26} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
-              4-day FREE trial
+        {/* Trial banner — only for first-time / eligible trial (issue #5) */}
+        {canStartTrial && (
+          <div className="trial-banner-highlight" data-testid="trial-banner" style={{ marginBottom: 22 }}>
+            <div className="trial-banner-icon">
+              <Gift size={26} />
             </div>
-            <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-              You won&apos;t be charged for the 4 days. Trial ends on <b>{trialEnd}</b>.
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
+                4-day FREE trial
+              </div>
+              <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                You won&apos;t be charged for the 4 days. Trial ends on <b>{trialEnd}</b>.
+              </div>
             </div>
           </div>
-        </div>
+        )}
+        {isExpired && (
+          <div className="trial-banner-highlight" data-testid="expired-banner" style={{ marginBottom: 22, borderColor: "rgba(217,99,99,0.45)" }}>
+            <div className="trial-banner-icon">
+              <ShieldCheck size={26} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
+                Subscription expired
+              </div>
+              <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                Your free trial / billing cycle has ended. Choose a plan below to resume orders, billing &amp; analytics.
+              </div>
+            </div>
+          </div>
+        )}
+        {existing?.status === "trial" && (
+          <div className="trial-banner-highlight" data-testid="trial-active-banner" style={{ marginBottom: 22 }}>
+            <div className="trial-banner-icon">
+              <Gift size={26} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
+                Trial active
+              </div>
+              <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                Your free trial ends on <b>{fmtDate(existing.trial_end)}</b>. Complete payment to keep access after that.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Active subscription banner: mid-cycle change applies next cycle */}
         {hasActive && (
@@ -293,8 +348,9 @@ export default function Subscribe() {
               You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
               {isChangeRequest ? (
                 <>
-                  Updating to <b>{tables} tables</b> will be billed from <b>{fmtDate(existing.next_cycle_start)}</b> (next cycle).
-                  Your current cycle continues unchanged.
+                  Updating to <b>{tables} tables</b> will be billed from <b>{fmtEffective}</b>
+                  {effectiveFrom && effectiveFrom.getTime() <= Date.now() + 60_000 ? " (effective immediately)" : " (next cycle)"}.
+                  Your current cycle continues unchanged until then.
                 </>
               ) : (
                 <>Adjust the slider to change your plan. Mid-cycle changes take effect on the next cycle.</>
@@ -540,9 +596,11 @@ export default function Subscribe() {
             ? "Processing…"
             : hasActive
               ? (isChangeRequest
-                  ? `Schedule change to ${tables} tables · effective ${fmtDate(existing.next_cycle_start)}`
+                  ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
                   : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
-              : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
+              : isExpired
+                ? `Pay & Resume · ${fmtRupee(pricing?.total_with_tax)} /mo`
+                : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
           <ShieldCheck size={12} /> Secured by 256-bit SSL · PCI DSS · UPI Autopay

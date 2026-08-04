@@ -5,21 +5,31 @@ import MenuForm, { useMenuForm } from "./menu/MenuForm";
 import MenuItemCard from "./menu/MenuItemCard";
 import MenuSearchBar from "./menu/MenuSearchBar";
 
-export default function MenuSection({ menu, categories, onRefresh }) {
+export default function MenuSection({ menu, categories, onRefresh, locked }) {
   const formState = useMenuForm();
   const [search, setSearch] = useState("");
 
   const removeItem = async (id) => {
+    if (locked) return toast.error("Subscribe to ZenTaap to manage the menu.");
     if (!window.confirm("Delete this item?")) return;
-    await api.delete(`/menu/${id}`);
-    toast.success("Item removed");
-    onRefresh();
+    try {
+      await api.delete(`/menu/${id}`);
+      toast.success("Item removed");
+      onRefresh();
+    } catch (err) {
+      if (err?.response?.status !== 402) toast.error(err?.response?.data?.detail || "Failed to delete");
+    }
   };
 
   const toggleAvail = async (it) => {
-    await api.put(`/menu/${it.id}`, { available: !it.available });
-    toast.success(it.available ? "Marked Not Available" : "Marked Available");
-    onRefresh();
+    if (locked) return toast.error("Subscribe to ZenTaap to manage the menu.");
+    try {
+      await api.put(`/menu/${it.id}`, { available: !it.available });
+      toast.success(it.available ? "Marked Not Available" : "Marked Available");
+      onRefresh();
+    } catch (err) {
+      if (err?.response?.status !== 402) toast.error(err?.response?.data?.detail || "Failed to update");
+    }
   };
 
   const filteredMenu = useMemo(() => {

@@ -45,15 +45,21 @@ api.interceptors.response.use(
       }
     }
     if (status === 402) {
-      const msg = err.response?.data?.detail || "Subscribe to ZenTaap to use this feature.";
-      toast.error(msg, { duration: 4500 });
+      const raw = err.response?.data?.detail;
+      const msg = typeof raw === "string" ? raw : "Subscribe to ZenTaap to use this feature.";
+      toast.error(msg, { duration: 5000, id: "sub-required" });
+      // Soft redirect — give the user time to read the toast (issue #3)
       if (typeof window !== "undefined" && !_redirecting) {
         const path = window.location.pathname;
         if (path.startsWith("/manager")) {
           _redirecting = true;
-          setTimeout(() => { _redirecting = false; window.location.assign("/subscribe"); }, 800);
+          setTimeout(() => { _redirecting = false; window.location.assign("/subscribe"); }, 2200);
         }
       }
+    }
+    if (status === 429) {
+      const msg = err.response?.data?.detail || "Too many attempts. Please wait and try again.";
+      toast.error(typeof msg === "string" ? msg : "Too many attempts.", { duration: 6000 });
     }
     return Promise.reject(err);
   }

@@ -12,20 +12,22 @@ import SettingsSection from "@/components/manager/SettingsSection";
 import LogoutDialog from "@/components/manager/LogoutDialog";
 
 const NAV = [
-  { key: "orders", label: "Live Orders", icon: ClipboardList },
-  { key: "tables", label: "Tables", icon: Grid3x3 },
-  { key: "menu", label: "Menu Management", icon: UtensilsCrossed },
-  { key: "sales", label: "Sales", icon: BarChart3 },
-  { key: "profile", label: "Profile", icon: User },
-  { key: "settings", label: "Settings", icon: SettingsIcon },
+  { key: "orders", label: "Live Orders", icon: ClipboardList, needsSub: true },
+  { key: "tables", label: "Tables", icon: Grid3x3, needsSub: true },
+  { key: "menu", label: "Menu Management", icon: UtensilsCrossed, needsSub: true },
+  { key: "sales", label: "Sales", icon: BarChart3, needsSub: true },
+  { key: "profile", label: "Profile", icon: User, needsSub: false },
+  { key: "settings", label: "Settings", icon: SettingsIcon, needsSub: false },
 ];
 
+const LIVE_TABS = new Set(["orders", "tables"]);
+
 export default function Manager() {
-  // Default landing section is "orders". When subscription is locked/expired, the gating
-  // useEffect below switches it to "profile" automatically (no flash).
   const [active, setActive] = useState("orders");
   const [showLogout, setShowLogout] = useState(false);
-  const [showRevenue, setShowRevenue] = useState(false);
+  const [showRevenue, setShowRevenue] = useState(() => {
+    try { return localStorage.getItem("tt_show_revenue") === "1"; } catch { return false; }
+  });
   const [orders, setOrders] = useState([]);
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -35,8 +37,24 @@ export default function Manager() {
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
+  const setShowRevenuePersist = useCallback((v) => {
+    const next = typeof v === "function" ? v(showRevenue) : v;
+    setShowRevenue(next);
+    try { localStorage.setItem("tt_show_revenue", next ? "1" : "0"); } catch { /* ignore */ }
+  }, [showRevenue]);
+
   const refresh = useCallback(async () => {
     try {
+      // On Settings/Profile, skip live orders/stats polling payload (issue #19)
+      if (active === "settings" || active === "profile") {
+        const [st, sub] = await Promise.all([
+          api.get("/settings"),
+          api.get("/subscription"),
+        ]);
+        setSettings(st.data);
+        setSubscription(sub.data);
+        return;
+      }
       const [o, m, c, s, st, sub] = await Promise.all([
         api.get("/orders"),
         api.get("/menu"),
@@ -52,19 +70,18 @@ export default function Manager() {
       setSettings(st.data);
       setSubscription(sub.data);
     } catch (err) {
-      // Silent on 1s poll loop — would spam the toast. Log so devs see it in console.
       console.warn("Manager.refresh failed:", err?.response?.status, err?.message);
     }
-  }, []);
+  }, [active]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // Auto refresh every 1 second
-  useInterval(refresh, 1000);
+  // Fast poll only on live ops tabs; slower elsewhere; none on settings/profile
+  const pollMs = LIVE_TABS.has(active) ? 2000 : (active === "sales" || active === "menu" ? 15000 : null);
+  useInterval(refresh, pollMs);
 
-  // Clock with month + date
   useEffect(() => {
     const tick = () => {
       const d = new Date();
@@ -85,8 +102,6 @@ export default function Manager() {
     try {
       await api.post("/auth/logout");
     } catch (err) {
-      // Even if the server call fails, we still clear local state so the user
-      // is logged out client-side. Log so devs can see it.
       console.warn("logout request failed:", err?.message);
     }
     localStorage.removeItem("mgr_token");
@@ -95,10 +110,9 @@ export default function Manager() {
   };
 
   const activeNav = NAV.find((n) => n.key === active);
-  const hasAccess = !subscription || subscription.has_access !== false;
+  const subStatus = subscription?.status;
+  const locked = subscription && !["trial", "active"].includes(subStatus);
 
-  // Force-redirect to /subscribe ONLY if subscription has hard-expired (not just 'none/skipped'):
-  // expired managers must take action; first-time visitors stay in Explore Mode.
   useEffect(() => {
     if (subscription?.status === "expired" && !["profile", "settings"].includes(active)) {
       navigate("/subscribe", { replace: true });
@@ -109,7 +123,6 @@ export default function Manager() {
 
   return (
     <div className={`layout ${mobileNav ? "mobile-nav-open" : ""}`} data-testid="manager-dashboard">
-      {/* Mobile menu toggle (visible on small screens) */}
       <button
         type="button"
         className="mobile-nav-toggle"
@@ -130,22 +143,24 @@ export default function Manager() {
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV.map((n) => {
             const Icon = n.icon;
+            const isLocked = locked && n.needsSub;
             return (
               <div
                 key={n.key}
-                className={`nav-link ${active === n.key ? "active" : ""}`}
+                className={`nav-link ${active === n.key ? "active" : ""} ${isLocked ? "locked" : ""}`}
                 onClick={() => {
                   setActive(n.key);
                   setMobileNav(false);
                 }}
                 data-testid={`nav-${n.key}`}
+                title={isLocked ? "Requires an active subscription" : undefined}
               >
                 <Icon size={16} className="icon" />
                 <span>{n.label}</span>
+                {isLocked && <Lock size={12} style={{ marginLeft: "auto", opacity: 0.7 }} />}
               </div>
             );
           })}
-          {/* Subscribe link — always available */}
           <div
             className="nav-link"
             onClick={() => { navigate("/subscribe"); setMobileNav(false); }}
@@ -172,32 +187,36 @@ export default function Manager() {
         <div className="topbar">
           <div className="page-title" data-testid="page-title">{activeNav?.label}</div>
           <div className="topbar-right">
-            <div className="live-pill">
-              <div className="live-dot-g" /> Live · auto-refresh 1s
-            </div>
+            {LIVE_TABS.has(active) && (
+              <div className="live-pill">
+                <div className="live-dot-g" /> Live · auto-refresh 2s
+              </div>
+            )}
             <span style={{ fontSize: 13, color: "var(--muted)" }} data-testid="top-clock">
               {clock}
             </span>
           </div>
         </div>
 
-        {/* Lock banner — shown when subscription is not active (none/skipped/expired). */}
         {subscription && !["trial", "active"].includes(subscription.status) && (
           <div className="explore-banner" data-testid="explore-mode-banner">
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1, minWidth: 220 }}>
-              <Lock size={18} color="var(--gold)" />
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 220 }}>
+              <Lock size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
               <div className="explore-banner-text">
                 {subscription.status === "expired" ? (
                   <>
-                    <b>Subscription expired</b> — Your last cycle ended on{" "}
+                    <b>Subscription expired</b> — cycle ended{" "}
                     <b>{subscription.cycle_end ? new Date(subscription.cycle_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</b>.
-                    Pay to resume orders, billing &amp; analytics.
                   </>
                 ) : (
                   <>
-                    <b>Explore Mode</b> — Browse freely, but you&apos;ll need an active subscription to take orders, generate bills &amp; mark tickets. Start your <b>4-day free trial</b> any time.
+                    <b>Explore Mode</b> — browse freely. Start a <b>4-day free trial</b> to unlock full features.
                   </>
                 )}
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }} data-testid="feature-lock-matrix">
+                  <b>Blocked without subscription:</b> placing/updating orders, generating bills, adding/editing menu items &amp; categories, and sales analytics APIs.
+                  {" "}Profile &amp; Settings stay available.
+                </div>
               </div>
             </div>
             <button
@@ -217,8 +236,9 @@ export default function Manager() {
             stats={stats}
             settings={settings}
             showRevenue={showRevenue}
-            setShowRevenue={setShowRevenue}
+            setShowRevenue={setShowRevenuePersist}
             onRefresh={refresh}
+            locked={locked}
           />
         )}
         {active === "tables" && <TablesSection orders={orders} subscription={subscription} />}
@@ -227,13 +247,14 @@ export default function Manager() {
             menu={menu}
             categories={categories}
             onRefresh={refresh}
+            locked={locked}
           />
         )}
         {active === "sales" && (
           <SalesSection
             stats={stats}
             showRevenue={showRevenue}
-            setShowRevenue={setShowRevenue}
+            setShowRevenue={setShowRevenuePersist}
             onLogoutClick={() => setShowLogout(true)}
           />
         )}

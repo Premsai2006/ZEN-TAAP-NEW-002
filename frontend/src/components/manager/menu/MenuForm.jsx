@@ -164,16 +164,39 @@ export default function MenuForm({ formState, categories, onRefresh }) {
               ))}
             </select>
             {form.category && (
-              <>
-                <button type="button" className="mini-btn" onClick={renameSelectedCat} data-testid="edit-selected-cat-btn" title="Rename this category">
-                  <Pencil size={12} />
-                </button>
-                <button type="button" className="mini-btn danger" onClick={deleteSelectedCat} data-testid="delete-selected-cat-btn" title="Delete this category">
-                  <Trash2 size={12} />
-                </button>
-              </>
+              <button type="button" className="mini-btn" onClick={renameSelectedCat} data-testid="edit-selected-cat-btn" title="Rename this category">
+                <Pencil size={12} /> Rename
+              </button>
             )}
           </div>
+          {form.category && (
+            <div
+              data-testid="delete-category-zone"
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTop: "1px dashed rgba(217,99,99,0.35)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.4 }}>
+                Danger zone — deleting <b>{form.category}</b> cannot be undone. Items move to Uncategorized.
+              </div>
+              <button
+                type="button"
+                className="mini-btn danger"
+                onClick={deleteSelectedCat}
+                data-testid="delete-selected-cat-btn"
+                title="Delete this category"
+                style={{ flexShrink: 0 }}
+              >
+                <Trash2 size={12} style={{ marginRight: 4 }} /> Delete category
+              </button>
+            </div>
+          )}
           {showNewCatInput && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }} data-testid="inline-new-cat-row">
               <input

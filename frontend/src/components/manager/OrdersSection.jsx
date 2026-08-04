@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import BillModal from "@/components/manager/BillModal";
 
@@ -17,13 +18,35 @@ const statusBadge = (s) => {
 
 const nextStatus = (s) => ({ new: "cooking", cooking: "done", done: "delivered" }[s]);
 
-const timeAgo = (iso) => {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return `${Math.floor(diff)}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
-  const days = Math.floor(diff / 86400);
-  return `${days} ${days === 1 ? "day" : "days"} ago`;
+const formatOrderTime = (iso) => {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    const absolute = d.toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const diff = (Date.now() - d.getTime()) / 1000;
+    let relative;
+    if (diff < 60) relative = `${Math.floor(diff)}s ago`;
+    else if (diff < 3600) relative = `${Math.floor(diff / 60)} min ago`;
+    else if (diff < 86400) relative = `${Math.floor(diff / 3600)} hr ago`;
+    else {
+      const days = Math.floor(diff / 86400);
+      relative = `${days} ${days === 1 ? "day" : "days"} ago`;
+    }
+    return { absolute, relative };
+  } catch {
+    return { absolute: iso, relative: "" };
+  }
+};
+
+const tableLabel = (table) => {
+  if (table === 0 || table == null) return "Walk-in";
+  return `Table ${table}`;
 };
 
 const maskRevenue = (val) => "•".repeat(Math.max(4, String(val).length));
@@ -43,15 +66,25 @@ export const GrowthPill = ({ pct, label = "vs prev 7d" }) => {
   );
 };
 
-export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh }) {
+export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh, locked }) {
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
 
   const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
   const updateOrder = async (id, status) => {
-    await api.put(`/orders/${id}`, { status });
-    onRefresh();
+    if (locked) {
+      toast.error("Subscribe to ZenTaap to update orders.");
+      return;
+    }
+    try {
+      await api.put(`/orders/${id}`, { status });
+      onRefresh();
+    } catch (err) {
+      if (err?.response?.status !== 402) {
+        toast.error(err?.response?.data?.detail || "Failed to update order");
+      }
+    }
   };
 
   const revenue = stats?.revenue ?? 0;
@@ -59,7 +92,7 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
 
   return (
     <div className="section active" data-testid="orders-section">
-      <div className="stats-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div className="stats-row">
         <div className="stat-card gold">
           <div className="stat-label">
             <ClipboardList size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
@@ -141,66 +174,73 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
             ))}
           </div>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Table</th>
-              <th>Items</th>
-              <th>Amount</th>
-              <th>Time</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody data-testid="orders-tbody">
-            {filtered.length === 0 && (
+        <div className="table-scroll">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 30 }}>
-                  No orders.
-                </td>
+                <th>Order ID</th>
+                <th>Table</th>
+                <th>Items</th>
+                <th>Amount</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Action</th>
               </tr>
-            )}
-            {filtered.map((o) => {
-              const nxt = nextStatus(o.status);
-              const itemsLabel = o.items.map((it) => `${it.name} ×${it.qty}`).join(", ");
-              return (
-                <tr key={o.id} data-testid={`order-row-${o.order_number}`}>
-                  <td style={{ fontWeight: 500, color: "var(--gold)" }}>#{o.order_number}</td>
-                  <td>Table {o.table}</td>
-                  <td style={{ fontSize: 13, color: "var(--muted)", maxWidth: 220 }}>{itemsLabel}</td>
-                  <td style={{ fontWeight: 500 }}>
-                    {showRevenue ? `₹${o.amount}` : `₹${maskRevenue(o.amount)}`}
-                  </td>
-                  <td style={{ color: "var(--muted)" }}>{timeAgo(o.created_at)}</td>
-                  <td>{statusBadge(o.status)}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {nxt && (
-                        <button
-                          className="mini-btn"
-                          onClick={() => updateOrder(o.id, nxt)}
-                          data-testid={`order-update-${o.order_number}`}
-                        >
-                          → {nxt}
-                        </button>
-                      )}
-                      <button
-                        className="mini-btn primary"
-                        onClick={() => setBillOrder(o)}
-                        data-testid={`generate-bill-${o.order_number}`}
-                        title="Generate Bill"
-                      >
-                        <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
-                        Bill
-                      </button>
-                    </div>
+            </thead>
+            <tbody data-testid="orders-tbody">
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 30 }}>
+                    No orders.
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+              {filtered.map((o) => {
+                const nxt = nextStatus(o.status);
+                const itemsLabel = (o.items || []).map((it) => `${it.name} ×${it.qty}`).join(", ");
+                const t = formatOrderTime(o.created_at);
+                return (
+                  <tr key={o.id} data-testid={`order-row-${o.order_number}`}>
+                    <td style={{ fontWeight: 500, color: "var(--gold)" }}>#{o.order_number}</td>
+                    <td>{tableLabel(o.table)}</td>
+                    <td style={{ fontSize: 13, color: "var(--muted)", maxWidth: 220 }}>{itemsLabel}</td>
+                    <td style={{ fontWeight: 500 }}>
+                      {showRevenue ? `₹${o.amount ?? 0}` : `₹${maskRevenue(o.amount ?? 0)}`}
+                    </td>
+                    <td style={{ color: "var(--muted)", whiteSpace: "nowrap" }} title={t.relative}>
+                      <div style={{ fontSize: 13 }}>{t.absolute}</div>
+                      <div style={{ fontSize: 11, opacity: 0.75 }}>{t.relative}</div>
+                    </td>
+                    <td>{statusBadge(o.status)}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {nxt && (
+                          <button
+                            className="mini-btn"
+                            onClick={() => updateOrder(o.id, nxt)}
+                            data-testid={`order-update-${o.order_number}`}
+                            disabled={locked}
+                          >
+                            → {nxt}
+                          </button>
+                        )}
+                        <button
+                          className="mini-btn primary"
+                          onClick={() => setBillOrder(o)}
+                          data-testid={`generate-bill-${o.order_number}`}
+                          title="Generate Bill"
+                        >
+                          <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
+                          Bill
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {billOrder && (

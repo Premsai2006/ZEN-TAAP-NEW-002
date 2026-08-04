@@ -50,16 +50,22 @@ const buildXLabels = (period, series) => {
   return series.map((p) => ({ ...p, x: p.label }));
 };
 
-export default function SalesSection({ stats, showRevenue, setShowRevenue, onLogoutClick }) {
+export default function SalesSection({ stats: todayStats, showRevenue, setShowRevenue, onLogoutClick }) {
   const [period, setPeriod] = useState("week");
   const [series, setSeries] = useState([]);
+  const [stats, setStats] = useState(todayStats);
 
   useEffect(() => {
     api
       .get(`/stats/revenue?period=${period}`)
       .then((r) => setSeries(r.data.series || []))
       .catch(() => setSeries([]));
-  }, [period]);
+    // Period-aware summary so cards/top-items match the selected range (issue #2)
+    api
+      .get(`/stats/summary?period=${period}`)
+      .then((r) => setStats(r.data))
+      .catch(() => setStats(todayStats));
+  }, [period, todayStats]);
 
   const fmt = (v) => (showRevenue ? `₹${(v ?? 0).toLocaleString("en-IN")}` : `₹${maskRev(v ?? 0)}`);
   const pieData = (stats?.revenue_by_category || []).map((c) => ({
@@ -69,11 +75,12 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
   }));
   const growth = stats?.growth_7d || {};
   const chartData = buildXLabels(period, series);
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label || period;
 
   return (
     <div className="section active" data-testid="sales-section">
       {/* 4 stat cards with growth pills */}
-      <div className="stats-row" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div className="stats-row">
         <div className="stat-card gold">
           <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>
@@ -91,9 +98,7 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             </button>
           </div>
           <div className="stat-value" data-testid="sales-revenue">{fmt(stats?.revenue)}</div>
-          <div className="stat-sub">
-            <GrowthPill pct={growth.revenue} /> Last 7 days
-          </div>
+          <div className="stat-sub">{periodLabel}</div>
         </div>
         <div className="stat-card green">
           <div className="stat-label">
@@ -121,9 +126,9 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             Gross Profit
           </div>
           <div className="stat-value" style={{ color: "#c084fc" }} data-testid="sales-gross-profit">
-            {fmt(stats?.gross_profit)}
+            {stats?.gross_profit == null ? "—" : fmt(stats.gross_profit)}
           </div>
-          <div className="stat-sub">@ 65% margin</div>
+          <div className="stat-sub">{stats?.gross_profit_note || "Based on menu cost prices"}</div>
         </div>
       </div>
 
@@ -248,8 +253,9 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
       {/* Top selling items with images */}
       <div className="orders-section" data-testid="top-items-card">
         <div className="section-header">
-          <div className="section-header-title">Top Selling Items</div>
+          <div className="section-header-title">Top Selling Items · {periodLabel}</div>
         </div>
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
@@ -290,6 +296,7 @@ export default function SalesSection({ stats, showRevenue, setShowRevenue, onLog
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="logout-box" data-testid="sales-logout-box">

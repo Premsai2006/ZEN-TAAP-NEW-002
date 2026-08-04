@@ -6,9 +6,11 @@ import { api } from "@/lib/api";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
 
 export default function Login() {
+  const [contact, setContact] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [lockedUntil, setLockedUntil] = useState(null);
   const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
 
@@ -28,19 +30,26 @@ export default function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!pin) {
-      toast.error("Enter your PIN");
+    if (lockedUntil && Date.now() < lockedUntil) {
+      const mins = Math.ceil((lockedUntil - Date.now()) / 60000);
+      toast.error(`Too many attempts. Try again in ${mins} minute(s).`);
+      return;
+    }
+    if (contact.replace(/[^0-9]/g, "").length < 7) {
+      toast.error("Enter your registered phone number");
+      return;
+    }
+    if (!pin || pin.length < 4) {
+      toast.error("Enter your PIN (at least 4 digits)");
       return;
     }
     setLoading(true);
     try {
-      // Stable device_id so the same browser keeps the same session slot across logins.
       let deviceId = localStorage.getItem("mgr_device_id");
       if (!deviceId) {
         deviceId = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 16);
         localStorage.setItem("mgr_device_id", deviceId);
       }
-      // Friendly device label
       let label = "Browser";
       try {
         const ua = navigator.userAgent || "";
@@ -50,12 +59,13 @@ export default function Login() {
       } catch {
         /* default */
       }
-      const { data } = await api.post("/auth/login", { pin, device_id: deviceId, device_label: label });
-      // httpOnly cookie is the auth source of truth now — set by the backend
-      // on this same response. We keep a non-sensitive flag for UI awareness.
+      const { data } = await api.post("/auth/login", {
+        pin,
+        contact_number: contact.trim(),
+        device_id: deviceId,
+        device_label: label,
+      });
       localStorage.setItem("mgr_authed", "1");
-      // Legacy hint for any code still reading the raw token (kept as fallback
-      // for the bearer-header path until we fully remove it in a follow-up).
       if (data.token) localStorage.setItem("mgr_token", data.token);
       if (data.active_devices >= data.max_devices) {
         toast.success(`Welcome back · ${data.active_devices}/${data.max_devices} devices used`);
@@ -64,7 +74,12 @@ export default function Login() {
       }
       navigate("/manager");
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Login failed");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || "Login failed";
+      if (status === 429) {
+        setLockedUntil(Date.now() + 15 * 60 * 1000);
+      }
+      toast.error(detail);
     } finally {
       setLoading(false);
     }
@@ -82,7 +97,29 @@ export default function Login() {
           Login
         </div>
         <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 26, textAlign: "center" }}>
-          Enter your numeric PIN to access the dashboard
+          Enter your registered phone number and PIN
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 14 }}>
+          <label className="form-label">Phone number</label>
+          <input
+            type="tel"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            placeholder="Registered mobile number"
+            autoFocus
+            data-testid="login-contact-input"
+            style={{
+              fontSize: 15,
+              padding: "12px 14px",
+              width: "100%",
+              background: "var(--bg)",
+              border: "1px solid var(--line)",
+              color: "var(--text)",
+              borderRadius: 8,
+              outline: "none",
+            }}
+          />
         </div>
 
         <div className="form-group" style={{ marginBottom: 18 }}>
@@ -94,9 +131,8 @@ export default function Login() {
               pattern="[0-9]*"
               value={pin}
               onChange={onPinChange}
-              placeholder=""
+              placeholder="6+ digits recommended"
               maxLength={10}
-              autoFocus
               data-testid="login-pin-input"
               style={{
                 fontSize: 20,
@@ -155,7 +191,6 @@ export default function Login() {
           </button>
         </div>
 
-        {/* Create Account — bold and prominent (no highlight box) */}
         <div style={{ textAlign: "center", marginTop: 28 }}>
           <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>New to ZenTaap?</div>
           <a
@@ -174,7 +209,6 @@ export default function Login() {
           </a>
         </div>
 
-        {/* Prominent access cards: Customer Menu + Kitchen Display */}
         <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
           <a
             href="/customer"

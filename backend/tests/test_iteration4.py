@@ -126,36 +126,24 @@ class TestChangePin:
         assert back.status_code == 200
 
 
-# ---------- Recover PIN ----------
+# ---------- Recover PIN (insecure phone-only path removed — requires OTP) ----------
 class TestRecoverPin:
-    def test_recover_wrong_contact(self, s):
+    def test_recover_pin_disabled_requires_otp(self, s):
         r = s.post(
             f"{API}/auth/recover-pin",
-            json={"contact_number": "1111111", "new_pin": "9090"},
+            json={"contact_number": EXPECTED_CONTACT, "new_pin": "654321"},
             timeout=15,
         )
-        assert r.status_code == 401
+        assert r.status_code == 410
+        assert "OTP" in (r.json().get("detail") or "")
 
-    def test_recover_correct_contact_and_revert(self, s):
-        new_pin = "6543"
+    def test_recover_wrong_contact_also_gone(self, s):
         r = s.post(
             f"{API}/auth/recover-pin",
-            json={"contact_number": EXPECTED_CONTACT, "new_pin": new_pin},
+            json={"contact_number": "1111111", "new_pin": "909090"},
             timeout=15,
         )
-        assert r.status_code == 200, r.text
-        ok = s.post(f"{API}/auth/login", json={"pin": new_pin}, timeout=15)
-        assert ok.status_code == 200
-        # revert via change-pin
-        rev = s.post(
-            f"{API}/auth/change-pin",
-            json={"old_pin": new_pin, "new_pin": CURRENT_PIN},
-            timeout=15,
-        )
-        assert rev.status_code == 200
-        # login restored
-        back = s.post(f"{API}/auth/login", json={"pin": CURRENT_PIN}, timeout=15)
-        assert back.status_code == 200
+        assert r.status_code == 410
 
 
 # ---------- Settings: gst_rate null & theme ----------
