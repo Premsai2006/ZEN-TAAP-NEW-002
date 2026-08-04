@@ -32,7 +32,6 @@ dist
 
 # Environment and credential files
 .env
-.env.*
 *.env
 *token.json*
 *credentials.json*
