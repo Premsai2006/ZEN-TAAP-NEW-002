@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ShoppingCart, Plus, Minus, X, Lock } from "lucide-react";
 import { api } from "@/lib/api";
@@ -131,6 +132,7 @@ function OrderSuccessOverlay({ tableNum, orderNumber, onDone }) {
 }
 
 export default function Customer() {
+  const { slug } = useParams();
   const [menu, setMenu] = useState([]);
   const [categories, setCategories] = useState([]);
   const [activeCat, setActiveCat] = useState("all");
@@ -138,6 +140,8 @@ export default function Customer() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber }
+  const [restaurantName, setRestaurantName] = useState("");
+  const [notFound, setNotFound] = useState(false);
 
   // Lock the table number from URL (?table=N). When missing/invalid -> null (walk-in).
   const tableFromUrl = useMemo(() => {
@@ -151,17 +155,24 @@ export default function Customer() {
   }, []);
 
   const refresh = async () => {
+    if (!slug) return;
     try {
-      const [m, c] = await Promise.all([api.get("/menu"), api.get("/categories")]);
+      const [m, c, r] = await Promise.all([
+        api.get(`/r/${slug}/menu`),
+        api.get(`/r/${slug}/categories`),
+        api.get(`/r/${slug}`),
+      ]);
       setMenu(m.data);
       setCategories(c.data);
+      setRestaurantName(r.data?.restaurant_name || "");
+      setNotFound(false);
     } catch (err) {
-      // 2s poll — don't toast on every failure, but log so devs catch network issues.
+      if (err?.response?.status === 404) setNotFound(true);
       console.warn("Customer.refresh failed:", err?.response?.status, err?.message);
     }
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [slug]);
 
   useInterval(() => refresh(), 2000);
 
@@ -193,8 +204,7 @@ export default function Customer() {
     setPlacing(true);
     try {
       const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price }));
-      const amount = cart.reduce((s, l) => s + l.qty * l.price, 0);
-      const { data } = await api.post("/orders", { table: tableN || 0, items, amount });
+      const { data } = await api.post(`/r/${slug}/orders`, { table: tableN || 0, items });
       setSuccessInfo({ tableNum: tableN || null, orderNumber: data?.order_number || null });
       setCart([]);
       setDrawerOpen(false);
@@ -205,6 +215,17 @@ export default function Customer() {
     }
   };
 
+  if (!slug || notFound) {
+    return (
+      <div className="main" style={{ maxWidth: 480, margin: "80px auto", textAlign: "center" }}>
+        <div className="font-serif" style={{ fontSize: 22, marginBottom: 8 }}>Restaurant not found</div>
+        <div style={{ color: "var(--muted)", fontSize: 14 }}>
+          Check the QR code or ask staff for the correct ordering link.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="main" style={{ maxWidth: 1100, margin: "0 auto" }} data-testid="customer-page">
       <div className="topbar">
@@ -212,6 +233,11 @@ export default function Customer() {
           <div className="brand-logo-wrap">
             <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 32 }} />
           </div>
+          {restaurantName && (
+            <div style={{ fontSize: 14, fontWeight: 600 }} data-testid="customer-restaurant-name">
+              {restaurantName}
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {tableFromUrl ? (

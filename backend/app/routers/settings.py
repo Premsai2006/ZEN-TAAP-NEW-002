@@ -1,28 +1,25 @@
 from fastapi import APIRouter, HTTPException, Depends
-from app.database import db
 from app.deps import require_manager
 from app.models import RestaurantSettings, SettingsUpdate
+from app.services import restaurants as rest_svc
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 @router.get("", response_model=RestaurantSettings)
-async def get_settings():
-    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
-    if not doc:
-        s = RestaurantSettings()
-        await db.settings.insert_one({"key": "restaurant", **s.model_dump()})
-        return s
-    doc.pop("key", None)
-    return RestaurantSettings(**doc)
+async def get_settings(sess=Depends(require_manager)):
+    doc = await rest_svc.require_restaurant_id(sess["restaurant_id"])
+    return RestaurantSettings(**rest_svc.settings_view(doc))
 
 
-@router.put("", response_model=RestaurantSettings, dependencies=[Depends(require_manager)])
-async def update_settings(body: SettingsUpdate):
+@router.put("", response_model=RestaurantSettings)
+async def update_settings(body: SettingsUpdate, sess=Depends(require_manager)):
+    rid = sess["restaurant_id"]
     update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to save — make a change first.")
-    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
-    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
-    doc.pop("key", None)
-    return RestaurantSettings(**doc)
+    if "phone" in update and update["phone"] is not None:
+        update["phone"] = update["phone"].strip()
+    await rest_svc.update_restaurant(rid, update)
+    doc = await rest_svc.require_restaurant_id(rid)
+    return RestaurantSettings(**rest_svc.settings_view(doc))

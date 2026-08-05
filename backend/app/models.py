@@ -6,6 +6,7 @@ import uuid
 
 class Category(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    restaurant_id: Optional[str] = None
     name: str
     slug: str
 
@@ -16,6 +17,7 @@ class CategoryCreate(BaseModel):
 
 class MenuItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    restaurant_id: Optional[str] = None
     name: str
     price: float
     category: Optional[str] = ""
@@ -89,6 +91,7 @@ class KitchenPinUpdate(BaseModel):
 
 class KitchenLoginBody(BaseModel):
     pin: str
+    slug: Optional[str] = None
 
 
 class CustomerLoginBody(BaseModel):
@@ -118,6 +121,7 @@ class OrderItem(BaseModel):
 
 class Order(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    restaurant_id: Optional[str] = None
     order_number: int
     table: int  # 0 = walk-in
     items: List[OrderItem]
@@ -148,6 +152,7 @@ class SignupRequest(BaseModel):
     contact_number: str
     pin: str
     email: Optional[str] = None
+    slug: Optional[str] = None
 
 
 class ProfileUpdate(BaseModel):
@@ -155,6 +160,7 @@ class ProfileUpdate(BaseModel):
     email: Optional[str] = None
     contact_number: Optional[str] = None
     restaurant_name: Optional[str] = None
+    slug: Optional[str] = None
 
 
 class ChangePinRequest(BaseModel):

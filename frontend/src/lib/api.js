@@ -16,7 +16,9 @@ export const api = axios.create({ baseURL: API, withCredentials: true });
 // localStorage anymore — the cookie is authoritative.
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
-    const t = localStorage.getItem("mgr_token");
+    const mgr = localStorage.getItem("mgr_token");
+    const kitchen = localStorage.getItem("kitchen_token");
+    const t = mgr || kitchen;
     if (t) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${t}`;

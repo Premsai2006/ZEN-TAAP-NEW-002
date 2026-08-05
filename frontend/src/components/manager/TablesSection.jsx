@@ -5,7 +5,14 @@ import { toast } from "sonner";
 
 const QR_DOMAIN = "https://zentaapqr.com";
 
+function restaurantOrderUrl(slug, tableN) {
+  const s = slug || localStorage.getItem("mgr_slug") || "";
+  if (!s) return `${QR_DOMAIN}/login`;
+  return `${QR_DOMAIN}/r/${s}?table=${tableN}`;
+}
+
 export default function TablesSection({ orders, subscription }) {
+  const slug = localStorage.getItem("mgr_slug") || "";
   const tableCount = useMemo(() => {
     // Total tables come from the active subscription; fall back to 15 for unsubscribed/explore mode.
     const t = subscription?.tables;
@@ -128,7 +135,7 @@ export default function TablesSection({ orders, subscription }) {
               <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
                 <div data-qr-svg={n} style={{ background: "white", padding: 8, borderRadius: 8 }}>
                   <QRCodeSVG
-                    value={`${QR_DOMAIN}/customer?table=${n}`}
+                    value={restaurantOrderUrl(slug, n)}
                     size={120}
                     bgColor="#ffffff"
                     fgColor="#161310"

@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Eye, EyeOff, UtensilsCrossed, ChefHat, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, ChefHat, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
@@ -14,15 +14,6 @@ export default function Login() {
   const [lockedUntil, setLockedUntil] = useState(null);
   const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    api
-      .get("/auth/status")
-      .then((r) => {
-        if (!r.data.setup_complete) navigate("/signup", { replace: true });
-      })
-      .catch(() => {});
-  }, [navigate]);
 
   const onPinChange = (e) => {
     const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 10);
@@ -68,6 +59,8 @@ export default function Login() {
       });
       localStorage.setItem("mgr_authed", "1");
       if (data.token) localStorage.setItem("mgr_token", data.token);
+      if (data.slug) localStorage.setItem("mgr_slug", data.slug);
+      if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       if (data.active_devices >= data.max_devices) {
         toast.success(`Welcome back · ${data.active_devices}/${data.max_devices} devices used`);
       } else {
@@ -210,23 +203,10 @@ export default function Login() {
 
         <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
           <a
-            href="/customer"
-            className="role-card role-card-customer"
-            data-testid="customer-view-link"
-          >
-            <div className="role-card-icon">
-              <UtensilsCrossed size={22} />
-            </div>
-            <div className="role-card-body">
-              <div className="role-card-title">Customer Menu</div>
-              <div className="role-card-sub">Browse & order</div>
-            </div>
-            <ArrowRight size={16} className="role-card-arrow" />
-          </a>
-          <a
             href="/kitchen"
             className="role-card role-card-kitchen"
             data-testid="kitchen-view-link"
+            style={{ flex: 1 }}
           >
             <div className="role-card-icon">
               <ChefHat size={22} />

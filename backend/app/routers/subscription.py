@@ -1,9 +1,10 @@
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException
-from app.database import db
+from fastapi import APIRouter, HTTPException, Depends
 from app.config import TRIAL_DAYS
 from app.models import SubscribeBody
 from app.services.pricing import compute_price
+from app.deps import require_manager
+from app.services import restaurants as rest_svc
 
 router = APIRouter(tags=["subscription"])
 
@@ -29,8 +30,8 @@ async def pricing(tables: int = 14):
 
 
 @router.get("/subscription")
-async def get_subscription():
-    doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+async def get_subscription(sess=Depends(require_manager)):
+    doc = await rest_svc.require_restaurant_id(sess["restaurant_id"])
     cycle_start = doc.get("cycle_start")
     next_cycle = doc.get("next_cycle_start")
     now = datetime.now(timezone.utc)
@@ -49,9 +50,7 @@ async def get_subscription():
                     last_paid_dt = None
             if now >= next_dt and (last_paid_dt is None or last_paid_dt < (next_dt - timedelta(days=1))):
                 status = "expired"
-                await db.settings.update_one(
-                    {"key": "restaurant"}, {"$set": {"subscription_status": "expired"}}
-                )
+                await rest_svc.update_restaurant(sess["restaurant_id"], {"subscription_status": "expired"})
             elif now >= next_dt and last_paid_dt and last_paid_dt >= (next_dt - timedelta(days=1)):
                 # Paid recently — roll cycle forward and apply pending table change
                 new_next = _advance_cycle_to_future(next_cycle, now)
@@ -71,7 +70,7 @@ async def get_subscription():
                     doc["subscription_total"] = price["total_with_tax"]
                     doc["pending_tables"] = None
                 next_cycle = new_next
-                await db.settings.update_one({"key": "restaurant"}, {"$set": updates})
+                await rest_svc.update_restaurant(sess["restaurant_id"], updates)
         except Exception:
             pass
 
@@ -82,9 +81,7 @@ async def get_subscription():
             if _parse_dt(next_cycle) < now:
                 effective_from = now.isoformat()
                 next_cycle = _advance_cycle_to_future(next_cycle, now)
-                await db.settings.update_one(
-                    {"key": "restaurant"}, {"$set": {"next_cycle_start": next_cycle}}
-                )
+                await rest_svc.update_restaurant(sess["restaurant_id"], {"next_cycle_start": next_cycle})
                 effective_from = next_cycle
         except Exception:
             pass
@@ -124,12 +121,12 @@ async def get_subscription():
 
 
 @router.post("/subscription")
-async def create_subscription(body: SubscribeBody):
+async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)):
     if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
         raise HTTPException(status_code=400, detail="Please choose a valid payment option.")
     price = compute_price(body.tables)
     now = datetime.now(timezone.utc)
-    existing = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
+    existing = await rest_svc.require_restaurant_id(sess["restaurant_id"])
     current_status = existing.get("subscription_status", "none")
     current_tables = existing.get("subscription_tables")
 
@@ -155,7 +152,7 @@ async def create_subscription(body: SubscribeBody):
             "pending_total": None,
             "last_payment_at": now.isoformat(),
         }
-        await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+        await rest_svc.update_restaurant(sess["restaurant_id"], update)
         return {
             "success": True,
             "applied": "immediate",
@@ -167,15 +164,12 @@ async def create_subscription(body: SubscribeBody):
         }
 
     if body.tables == current_tables:
-        await db.settings.update_one(
-            {"key": "restaurant"},
-            {"$set": {
+        await rest_svc.update_restaurant(sess["restaurant_id"], {
                 "payment_method": body.payment_method,
                 "pending_tables": None,
                 "pending_subtotal": None,
                 "pending_total": None,
-            }},
-        )
+            })
         return {"success": True, "applied": "no_change", "tables": current_tables}
 
     next_cycle_iso = existing.get("next_cycle_start")
@@ -211,7 +205,7 @@ async def create_subscription(body: SubscribeBody):
             "cycle_start": now.isoformat(),
             "next_cycle_start": new_next,
         }
-        await db.settings.update_one({"key": "restaurant"}, {"$set": update})
+        await rest_svc.update_restaurant(sess["restaurant_id"], update)
         return {
             "success": True,
             "applied": "immediate",
@@ -228,7 +222,7 @@ async def create_subscription(body: SubscribeBody):
         "cycle_start": cycle_start_iso,
         "next_cycle_start": next_cycle_iso,
     }
-    await db.settings.update_one({"key": "restaurant"}, {"$set": pending_update})
+    await rest_svc.update_restaurant(sess["restaurant_id"], pending_update)
     return {
         "success": True,
         "applied": "next_cycle",
@@ -241,7 +235,7 @@ async def create_subscription(body: SubscribeBody):
 
 
 @router.put("/subscription/autopay")
-async def toggle_autopay(body: dict):
+async def toggle_autopay(body: dict, sess=Depends(require_manager)):
     enable = bool(body.get("enabled", False))
-    await db.settings.update_one({"key": "restaurant"}, {"$set": {"autopay_enabled": enable}})
+    await rest_svc.update_restaurant(sess["restaurant_id"], {"autopay_enabled": enable})
     return {"success": True, "autopay_enabled": enable}

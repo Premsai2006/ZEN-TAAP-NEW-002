@@ -457,7 +457,7 @@ export default function Subscribe() {
                 {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
                   <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
                     <QRCodeSVG
-                      value={`${QR_DOMAIN}/customer?table=${n}`}
+                      value={`${QR_DOMAIN}/r/${localStorage.getItem("mgr_slug") || "restaurant"}?table=${n}`}
                       size={84}
                       bgColor="#ffffff"
                       fgColor="#161310"
@@ -479,7 +479,7 @@ export default function Subscribe() {
                 {Array.from({ length: tables }, (_, i) => i + 1).map((n) => (
                   <div key={`hide-${n}`} data-qr-svg-sub={n}>
                     <QRCodeSVG
-                      value={`${QR_DOMAIN}/customer?table=${n}`}
+                      value={`${QR_DOMAIN}/r/${localStorage.getItem("mgr_slug") || "restaurant"}?table=${n}`}
                       size={160}
                       bgColor="#ffffff"
                       fgColor="#161310"

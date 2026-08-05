@@ -5,10 +5,11 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.config import DEMO_MODE, CORS_ORIGINS
 from app.database import client, db
-from app.models import RestaurantSettings
 from app.routers import (
     auth, profile, categories, menu, orders, settings, subscription, payments, stats, upload,
+    public_restaurant,
 )
+from app.services import restaurants as rest_svc
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("zentaap")
@@ -26,11 +27,12 @@ api_router.include_router(subscription.router)
 api_router.include_router(payments.router)
 api_router.include_router(stats.router)
 api_router.include_router(upload.router)
+api_router.include_router(public_restaurant.router)
 
 
 @api_router.get("/")
 async def root():
-    return {"message": "ZenTaap Manager API"}
+    return {"message": "ZenTaap Manager API", "multi_tenant": True}
 
 
 app.include_router(api_router)
@@ -54,14 +56,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def seed():
-    if not await db.settings.find_one({"key": "restaurant"}):
-        s = RestaurantSettings()
-        await db.settings.insert_one({"key": "restaurant", **s.model_dump()})
-    else:
-        await db.settings.update_one(
-            {"key": "restaurant", "customer_pin": {"$exists": False}},
-            {"$set": {"customer_pin": "1234"}},
-        )
+    await rest_svc.ensure_indexes()
+    migrated = await rest_svc.migrate_singleton_to_restaurants()
+    if migrated:
+        logger.info("Multi-tenant migration ready: restaurant_id=%s", migrated)
 
     # Fix known spelling typo in menu item names (issue #12)
     cursor = db.menu_items.find({"name": {"$regex": "Muttion", "$options": "i"}})

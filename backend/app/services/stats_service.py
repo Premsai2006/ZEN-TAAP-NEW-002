@@ -2,10 +2,11 @@ from datetime import datetime, timezone, date, timedelta
 from app.database import db
 
 
-async def orders_in_range(start_iso: str, end_iso: str) -> list:
-    return await db.orders.find(
-        {"created_at": {"$gte": start_iso, "$lt": end_iso}}, {"_id": 0}
-    ).to_list(5000)
+async def orders_in_range(start_iso: str, end_iso: str, restaurant_id: str = None) -> list:
+    q = {"created_at": {"$gte": start_iso, "$lt": end_iso}}
+    if restaurant_id:
+        q["restaurant_id"] = restaurant_id
+    return await db.orders.find(q, {"_id": 0}).to_list(5000)
 
 
 def aggregate_orders(orders: list) -> dict:
@@ -26,13 +27,13 @@ def growth_pct(current: float, prior: float) -> float:
     return round((current - prior) / prior * 100, 1)
 
 
-async def seven_day_growth(today: date) -> dict:
+async def seven_day_growth(today: date, restaurant_id: str = None) -> dict:
     last_7_start = today - timedelta(days=6)
     last_7_end = today + timedelta(days=1)
     prev_7_start = today - timedelta(days=13)
     prev_7_end = today - timedelta(days=6)
-    current = aggregate_orders(await orders_in_range(last_7_start.isoformat(), last_7_end.isoformat()))
-    prior = aggregate_orders(await orders_in_range(prev_7_start.isoformat(), prev_7_end.isoformat()))
+    current = aggregate_orders(await orders_in_range(last_7_start.isoformat(), last_7_end.isoformat(), restaurant_id))
+    prior = aggregate_orders(await orders_in_range(prev_7_start.isoformat(), prev_7_end.isoformat(), restaurant_id))
     return {
         "revenue": growth_pct(current["revenue"], prior["revenue"]),
         "orders": growth_pct(current["orders"], prior["orders"]),
@@ -51,10 +52,13 @@ def count_top_items(orders: list) -> list:
     return sorted(counter.values(), key=lambda x: x["qty"], reverse=True)[:6]
 
 
-async def menu_meta_for(orders: list) -> tuple:
+async def menu_meta_for(orders: list, restaurant_id: str = None) -> tuple:
     item_names = list({it["name"] for o in orders for it in (o.get("items") or [])})
+    q = {"name": {"$in": item_names}}
+    if restaurant_id:
+        q["restaurant_id"] = restaurant_id
     items = (
-        await db.menu_items.find({"name": {"$in": item_names}}, {"_id": 0}).to_list(500)
+        await db.menu_items.find(q, {"_id": 0}).to_list(500)
         if item_names else []
     )
     cat_map = {i["name"]: (i.get("category") or "Uncategorized") for i in items}
@@ -96,27 +100,28 @@ def compute_gross_profit(orders: list, cost_map: dict) -> tuple:
     return round(revenue - total_cost, 2), None
 
 
-async def fetch_orders_for_period(period: str) -> list:
+async def fetch_orders_for_period(period: str, restaurant_id: str = None) -> list:
     now = datetime.now(timezone.utc)
     today = now.date()
+    base = {"restaurant_id": restaurant_id} if restaurant_id else {}
     if period == "today":
         return await db.orders.find(
-            {"created_at": {"$regex": f"^{today.isoformat()}"}}, {"_id": 0}
+            {**base, "created_at": {"$regex": f"^{today.isoformat()}"}}, {"_id": 0}
         ).to_list(2000)
     if period == "yesterday":
         y = (today - timedelta(days=1)).isoformat()
         return await db.orders.find(
-            {"created_at": {"$regex": f"^{y}"}}, {"_id": 0}
+            {**base, "created_at": {"$regex": f"^{y}"}}, {"_id": 0}
         ).to_list(2000)
     if period == "week":
         start = (today - timedelta(days=6)).isoformat()
         end = (today + timedelta(days=1)).isoformat()
-        return await orders_in_range(start, end)
-    # total — all orders
-    return await db.orders.find({}, {"_id": 0}).to_list(5000)
+        return await orders_in_range(start, end, restaurant_id)
+    # total — all orders for restaurant
+    return await db.orders.find(base or {}, {"_id": 0}).to_list(5000)
 
 
-async def build_stats_payload(orders: list, today: date) -> dict:
+async def build_stats_payload(orders: list, today: date, restaurant_id: str = None) -> dict:
     total_orders = len(orders)
     revenue = sum(o["amount"] for o in orders)
     completed = sum(1 for o in orders if o["status"] in ("done", "delivered"))
@@ -127,10 +132,10 @@ async def build_stats_payload(orders: list, today: date) -> dict:
     })
     avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
 
-    cat_map, img_map, emoji_map, cost_map = await menu_meta_for(orders)
+    cat_map, img_map, emoji_map, cost_map = await menu_meta_for(orders, restaurant_id)
     gross_profit, gp_note = compute_gross_profit(orders, cost_map)
 
-    growth_7d = await seven_day_growth(today)
+    growth_7d = await seven_day_growth(today, restaurant_id)
     top = count_top_items(orders)
     for t in top:
         t["category"] = cat_map.get(t["name"], "Uncategorized")

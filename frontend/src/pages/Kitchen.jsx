@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ChefHat, ArrowLeft, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -8,19 +8,23 @@ import { useInterval } from "@/hooks/useInterval";
 
 const KITCHEN_TOKEN_KEY = "kitchen_token";
 
-function KitchenPinGate({ onUnlock }) {
+function KitchenPinGate({ slug, onUnlock }) {
   const [pin, setPin] = useState("");
+  const [slugInput, setSlugInput] = useState(slug || "");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
+    const s = (slug || slugInput || "").trim().toLowerCase();
+    if (!s) return toast.error("Enter your restaurant URL name (slug).");
     if (!pin) return toast.error("Please enter the kitchen PIN.");
     setLoading(true);
     try {
-      const { data } = await api.post("/auth/kitchen-login", { pin });
+      const { data } = await api.post("/auth/kitchen-login", { pin, slug: s });
       localStorage.setItem(KITCHEN_TOKEN_KEY, data.token);
-      onUnlock();
+      if (data.slug) localStorage.setItem("kitchen_slug", data.slug);
+      onUnlock(data.slug || s);
     } catch (err) {
       toast.error(friendlyError(err, "That kitchen PIN is incorrect. Please try again."));
     } finally {
@@ -53,6 +57,20 @@ function KitchenPinGate({ onUnlock }) {
           Ask your manager for the kitchen PIN — set under <b>Manager → Settings → Kitchen Display PIN</b>.
         </div>
 
+        {!slug && (
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label">Restaurant URL</label>
+            <input
+              type="text"
+              value={slugInput}
+              onChange={(e) => setSlugInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              placeholder="my-bistro"
+              data-testid="kitchen-slug-input"
+              style={{ width: "100%", padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8 }}
+            />
+          </div>
+        )}
+
         <div className="form-group" style={{ marginBottom: 16 }}>
           <div style={{ position: "relative" }}>
             <input
@@ -62,7 +80,7 @@ function KitchenPinGate({ onUnlock }) {
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
-              autoFocus
+              autoFocus={!!slug}
               data-testid="kitchen-pin-input"
               style={{ fontSize: 22, letterSpacing: 8, textAlign: "center", padding: "14px 44px 14px 12px", width: "100%", background: "var(--bg)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8, outline: "none" }}
             />
@@ -111,6 +129,7 @@ const isToday = (iso) => {
 };
 
 export default function Kitchen() {
+  const { slug: slugParam } = useParams();
   const [authed, setAuthed] = useState(!!localStorage.getItem(KITCHEN_TOKEN_KEY));
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("active");
@@ -167,7 +186,7 @@ export default function Kitchen() {
       ? orders.filter((o) => ACTIVE.includes(o.status))
       : orders.filter((o) => o.status === filter);
 
-  if (!authed) return <KitchenPinGate onUnlock={() => setAuthed(true)} />;
+  if (!authed) return <KitchenPinGate slug={slugParam} onUnlock={() => setAuthed(true)} />;
 
   return (
     <div className="kitchen-shell" data-testid="kitchen-page">

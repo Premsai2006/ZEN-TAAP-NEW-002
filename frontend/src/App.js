@@ -56,8 +56,10 @@ function App() {
               </RequireAuth>
             }
           />
-          <Route path="/customer" element={<Customer />} />
+          <Route path="/customer" element={<Navigate to="/login" replace />} />
+          <Route path="/r/:slug" element={<Customer />} />
           <Route path="/kitchen" element={<Kitchen />} />
+          <Route path="/kitchen/:slug" element={<Kitchen />} />
         </Routes>
       </BrowserRouter>
       <Toaster theme={localStorage.getItem("tt_theme") === "light" ? "light" : "dark"} position="top-right" />

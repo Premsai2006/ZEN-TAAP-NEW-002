@@ -1,14 +1,15 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 
 from app.config import (
     RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, RAZORPAY_PAYMENT_LINK,
 )
-from app.database import db
 from app.models import RazorpayOrderBody, VerifyPaymentBody
 from app.services.pricing import compute_price
+from app.deps import require_manager
+from app.services import restaurants as rest_svc
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 logger = logging.getLogger(__name__)
@@ -35,22 +36,28 @@ async def payments_config():
 
 
 @router.post("/create-order")
-async def create_razorpay_order(body: RazorpayOrderBody):
+async def create_razorpay_order(body: RazorpayOrderBody, sess=Depends(require_manager)):
     price = compute_price(body.tables)
     amount_paise = int(round(price["total_with_tax"] * 100))
     client = _razorpay_client()
+    rid = sess["restaurant_id"]
     if not client:
         return {
             "configured": False,
             "fallback_link": RAZORPAY_PAYMENT_LINK,
             "amount": amount_paise,
             "currency": "INR",
+            "restaurant_id": rid,
             "note": "Razorpay API keys not configured — using public payment-page redirect (no autopay).",
         }
-    receipt = f"zentaap_{uuid.uuid4().hex[:16]}"[:40]
-    order = client.order.create(
-        {"amount": amount_paise, "currency": "INR", "payment_capture": 1, "receipt": receipt}
-    )
+    receipt = f"zt_{rid[:8]}_{uuid.uuid4().hex[:8]}"[:40]
+    order = client.order.create({
+        "amount": amount_paise,
+        "currency": "INR",
+        "payment_capture": 1,
+        "receipt": receipt,
+        "notes": {"restaurant_id": rid, "tables": str(body.tables)},
+    })
     return {
         "configured": True,
         "key_id": RAZORPAY_KEY_ID,
@@ -58,11 +65,12 @@ async def create_razorpay_order(body: RazorpayOrderBody):
         "amount": amount_paise,
         "currency": "INR",
         "receipt": receipt,
+        "restaurant_id": rid,
     }
 
 
 @router.post("/verify")
-async def verify_razorpay_payment(body: VerifyPaymentBody):
+async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_manager)):
     client = _razorpay_client()
     if client and body.razorpay_signature:
         try:
@@ -85,7 +93,7 @@ async def verify_razorpay_payment(body: VerifyPaymentBody):
         "last_payment_at": now_iso,
         "autopay_enabled": bool(body.enable_autopay),
     }
-    await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
+    await rest_svc.update_restaurant(sess["restaurant_id"], update)
     return {
         "success": True,
         "status": "active",
@@ -111,14 +119,18 @@ async def razorpay_webhook(request: Request):
         data = {}
     event = data.get("event", "")
     if event in ("payment.captured", "subscription.charged"):
-        pid = ((data.get("payload") or {}).get("payment") or {}).get("entity", {}).get("id")
-        await db.settings.update_one(
-            {"key": "restaurant"},
-            {"$set": {
-                "subscription_status": "active",
-                "last_payment_id": pid,
-                "last_payment_at": datetime.now(timezone.utc).isoformat(),
-                "autopay_enabled": True,
-            }},
-        )
+        entity = ((data.get("payload") or {}).get("payment") or {}).get("entity", {})
+        pid = entity.get("id")
+        notes = entity.get("notes") or {}
+        rid = notes.get("restaurant_id")
+        update = {
+            "subscription_status": "active",
+            "last_payment_id": pid,
+            "last_payment_at": datetime.now(timezone.utc).isoformat(),
+            "autopay_enabled": True,
+        }
+        if rid:
+            await rest_svc.update_restaurant(rid, update)
+        else:
+            logger.warning("Webhook missing restaurant_id notes; payment %s ignored for tenant update", pid)
     return {"received": True, "event": event}

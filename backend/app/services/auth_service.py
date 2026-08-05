@@ -1,11 +1,10 @@
-import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import HTTPException, Request
 
 from app.config import (
-    MAX_DEVICES, DEMO_MODE, MAX_PIN_ATTEMPTS, LOCKOUT_MINUTES,
+    MAX_DEVICES, MAX_PIN_ATTEMPTS, LOCKOUT_MINUTES,
     PIN_MIN_NEW, PIN_MAX, PIN_MIN_LEGACY,
 )
 from app.database import db
@@ -34,19 +33,6 @@ def validate_short_pin(pin: str, label: str = "PIN"):
         raise HTTPException(status_code=400, detail=f"{label} must be 4–6 digits.")
 
 
-async def get_profile():
-    return await db.settings.find_one({"key": "manager_profile"}, {"_id": 0})
-
-
-async def get_stored_pin() -> Optional[str]:
-    p = await get_profile()
-    stored = p.get("pin") if p else None
-    if not stored:
-        legacy = await db.settings.find_one({"key": "manager_pin"}, {"_id": 0})
-        stored = legacy["value"] if legacy else None
-    return stored
-
-
 def _attempt_key(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for") or ""
     ip = (forwarded.split(",")[0].strip() if forwarded else "") or (
@@ -73,7 +59,6 @@ async def check_login_lockout(request: Request):
                 status_code=429,
                 detail=f"Too many incorrect attempts. Try again in {mins} minute(s).",
             )
-        # Lock expired — clear
         await db.login_attempts.delete_one({"key": key})
 
 
@@ -103,27 +88,37 @@ async def clear_login_failures(request: Request):
     await db.login_attempts.delete_one({"key": _attempt_key(request)})
 
 
-async def register_session(device_id: Optional[str], device_label: Optional[str]) -> dict:
+async def register_session(
+    restaurant_id: str,
+    device_id: Optional[str],
+    device_label: Optional[str],
+    *,
+    scope: str = "manager",
+) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
-    token = f"mgr-{uuid.uuid4()}"
+    prefix = "mgr" if scope == "manager" else scope
+    token = f"{prefix}-{uuid.uuid4()}"
     if not device_id:
         device_id = uuid.uuid4().hex[:16]
     label = (device_label or "Unknown device")[:80]
 
-    # Dedupe: remove any extra docs with same device_id (keep at most one via replace).
-    existing = await db.sessions.find({"device_id": device_id}).to_list(20)
+    existing = await db.sessions.find(
+        {"restaurant_id": restaurant_id, "scope": scope, "device_id": device_id}
+    ).to_list(20)
     if existing:
-        # Keep one, delete extras, then update
         keep = existing[0]
         if len(existing) > 1:
             await db.sessions.delete_many({
+                "restaurant_id": restaurant_id,
+                "scope": scope,
                 "device_id": device_id,
                 "_id": {"$ne": keep["_id"]},
             })
         await db.sessions.update_one(
             {"_id": keep["_id"]},
             {"$set": {
-                "scope": "manager",
+                "scope": scope,
+                "restaurant_id": restaurant_id,
                 "token": token,
                 "last_used": now_iso,
                 "device_label": label,
@@ -131,14 +126,19 @@ async def register_session(device_id: Optional[str], device_label: Optional[str]
             }},
         )
     else:
-        sessions = await db.sessions.find({"scope": "manager"}, {"_id": 0}).to_list(50)
-        # Dedupe by device_id in memory then enforce cap
+        sessions = await db.sessions.find(
+            {"restaurant_id": restaurant_id, "scope": scope}, {"_id": 0}
+        ).to_list(50)
         seen = set()
         unique = []
         for s in sessions:
             did = s.get("device_id")
             if did and did in seen:
-                await db.sessions.delete_one({"device_id": did, "token": s.get("token")})
+                await db.sessions.delete_one({
+                    "restaurant_id": restaurant_id,
+                    "device_id": did,
+                    "token": s.get("token"),
+                })
                 continue
             if did:
                 seen.add(did)
@@ -146,9 +146,14 @@ async def register_session(device_id: Optional[str], device_label: Optional[str]
         if len(unique) >= MAX_DEVICES:
             unique.sort(key=lambda s: s.get("last_used") or s.get("created_at") or "")
             oldest = unique[0]
-            await db.sessions.delete_one({"device_id": oldest["device_id"]})
+            await db.sessions.delete_one({
+                "restaurant_id": restaurant_id,
+                "scope": scope,
+                "device_id": oldest["device_id"],
+            })
         await db.sessions.insert_one({
-            "scope": "manager",
+            "scope": scope,
+            "restaurant_id": restaurant_id,
             "device_id": device_id,
             "device_label": label,
             "token": token,
@@ -156,33 +161,30 @@ async def register_session(device_id: Optional[str], device_label: Optional[str]
             "last_used": now_iso,
         })
 
-    # Count unique device_ids
-    all_sess = await db.sessions.find({"scope": "manager"}, {"_id": 0, "device_id": 1}).to_list(50)
+    all_sess = await db.sessions.find(
+        {"restaurant_id": restaurant_id, "scope": scope},
+        {"_id": 0, "device_id": 1},
+    ).to_list(50)
     active = len({s["device_id"] for s in all_sess if s.get("device_id")})
-    return {"token": token, "device_id": device_id, "active_devices": active}
+    return {
+        "token": token,
+        "device_id": device_id,
+        "active_devices": active,
+        "restaurant_id": restaurant_id,
+    }
 
 
-async def list_unique_sessions() -> list:
-    docs = await db.sessions.find({"scope": "manager"}, {"_id": 0, "token": 0}).to_list(50)
+async def list_unique_sessions(restaurant_id: str, scope: str = "manager") -> list:
+    docs = await db.sessions.find(
+        {"restaurant_id": restaurant_id, "scope": scope},
+        {"_id": 0, "token": 0},
+    ).to_list(50)
     by_device = {}
     for s in docs:
         did = s.get("device_id") or s.get("created_at") or id(s)
         prev = by_device.get(did)
-        if not prev:
-            by_device[did] = s
-            continue
-        # Keep most recently used
-        if (s.get("last_used") or "") > (prev.get("last_used") or ""):
+        if not prev or (s.get("last_used") or "") > (prev.get("last_used") or ""):
             by_device[did] = s
     result = list(by_device.values())
     result.sort(key=lambda s: s.get("last_used") or s.get("created_at") or "", reverse=True)
     return result
-
-
-async def contact_matches(given: str) -> bool:
-    p = await get_profile()
-    if not p or not p.get("contact_number"):
-        return True  # no contact on file — skip
-    saved = digits(p.get("contact_number"))
-    given_d = digits(given)
-    return bool(saved and given_d and saved[-7:] == given_d[-7:])

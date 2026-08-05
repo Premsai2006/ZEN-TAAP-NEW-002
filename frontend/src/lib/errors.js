@@ -19,6 +19,8 @@ export function extractDetail(err) {
 
 const RULES = [
   [/already (has a restaurant|registered|set up)/i, "A restaurant is already set up here. Please log in instead."],
+  [/phone number already exists|already used by another/i, "An account with this phone number already exists. Please log in instead."],
+  [/url name is already taken|url name is reserved/i, "That restaurant URL is taken. Please choose another."],
   [/manager name/i, "Please enter the manager's name."],
   [/restaurant name/i, "Please enter your restaurant name."],
   [/contact number required/i, "Please enter your phone number."],

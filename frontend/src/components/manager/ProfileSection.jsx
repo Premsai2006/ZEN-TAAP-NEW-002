@@ -17,7 +17,13 @@ const fmtDate = (iso) => {
 
 export default function ProfileSection({ onRefresh }) {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState({ manager_name: "", email: "", contact_number: "", restaurant_name: "" });
+  const [profile, setProfile] = useState({
+    manager_name: "",
+    email: "",
+    contact_number: "",
+    restaurant_name: "",
+    slug: "",
+  });
   const [subscription, setSubscription] = useState(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -29,7 +35,11 @@ export default function ProfileSection({ onRefresh }) {
   useEffect(() => {
     api
       .get("/profile")
-      .then((r) => setProfile(r.data))
+      .then((r) => {
+        setProfile(r.data);
+        if (r.data.slug) localStorage.setItem("mgr_slug", r.data.slug);
+        if (r.data.restaurant_id) localStorage.setItem("mgr_restaurant_id", r.data.restaurant_id);
+      })
       .catch(() => {});
     loadSub();
   }, []);
@@ -41,6 +51,7 @@ export default function ProfileSection({ onRefresh }) {
     setSaving(true);
     try {
       await api.put("/profile", profile);
+      if (profile.slug) localStorage.setItem("mgr_slug", profile.slug);
       toast.success("Profile updated");
       setEditing(false);
       onRefresh?.();
@@ -280,6 +291,19 @@ export default function ProfileSection({ onRefresh }) {
                 data-testid="profile-restaurant-input"
               />
             </div>
+          </div>
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label className="form-label">Restaurant URL</label>
+            <input
+              type="text"
+              value={profile.slug || ""}
+              onChange={(e) => set("slug", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              placeholder="my-bistro"
+              data-testid="profile-slug-input"
+            />
+            <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
+              Ordering link: zentaapqr.com/r/{profile.slug || "…"}
+            </span>
           </div>
           <div className="form-row">
             <div className="form-group">

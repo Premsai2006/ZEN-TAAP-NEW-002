@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
@@ -54,25 +54,27 @@ const PinInput = ({ value, onChange, testId, autoFocus }) => {
   );
 };
 
+const slugify = (s) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48);
+
 export default function Signup() {
   const [form, setForm] = useState({
     manager_name: "",
     restaurant_name: "",
+    slug: "",
     contact_number: "",
     email: "",
     pin: "",
     confirm_pin: "",
   });
-  const [accountExists, setAccountExists] = useState(false);
+  const [slugTouched, setSlugTouched] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    api
-      .get("/auth/status")
-      .then((r) => setAccountExists(!!r.data.setup_complete))
-      .catch(() => {});
-  }, []);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -80,23 +82,25 @@ export default function Signup() {
     e.preventDefault();
     if (!form.manager_name.trim()) return toast.error("Please enter the manager's name.");
     if (!form.restaurant_name.trim()) return toast.error("Please enter your restaurant name.");
+    const slug = slugify(form.slug || form.restaurant_name);
+    if (slug.length < 2) return toast.error("Please choose a URL name for your restaurant.");
     const digits = form.contact_number.replace(/[^0-9]/g, "");
     if (digits.length < 7) return toast.error("Please enter a valid phone number.");
     if (form.pin.length < 6) return toast.error("Your PIN needs to be at least 6 digits.");
     if (form.pin !== form.confirm_pin) return toast.error("Your PINs don't match — please try again.");
-    if (accountExists) {
-      return toast.error("A restaurant is already set up here. Please log in instead.");
-    }
     setLoading(true);
     try {
       const { data } = await api.post("/auth/signup", {
         manager_name: form.manager_name.trim(),
         restaurant_name: form.restaurant_name.trim(),
+        slug,
         contact_number: form.contact_number.trim(),
         email: form.email.trim(),
         pin: form.pin,
       });
       localStorage.setItem("mgr_token", data.token);
+      if (data.slug) localStorage.setItem("mgr_slug", data.slug);
+      if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       toast.success("Account created — next, choose your plan.");
       navigate("/subscribe");
     } catch (err) {
@@ -105,6 +109,8 @@ export default function Signup() {
       setLoading(false);
     }
   };
+
+  const previewSlug = slugify(slugTouched ? form.slug : form.slug || form.restaurant_name) || "your-restaurant";
 
   return (
     <div className="login-shell" data-testid="signup-page">
@@ -118,28 +124,8 @@ export default function Signup() {
           Create your account
         </div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22, textAlign: "center" }}>
-          Register your restaurant and choose your PIN.
+          Register your restaurant — each venue gets its own login and menu.
         </div>
-
-        {accountExists && (
-          <div
-            data-testid="signup-existing-notice"
-            style={{
-              background: "rgba(232,125,47,0.10)",
-              border: "1px solid rgba(232,125,47,0.4)",
-              color: "var(--gold)",
-              padding: "10px 14px",
-              borderRadius: 10,
-              fontSize: 13,
-              marginBottom: 18,
-              textAlign: "center",
-            }}
-          >
-            A restaurant is already registered here. Only one restaurant can use this account —{" "}
-            <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>log in</a>
-            {" "}instead.
-          </div>
-        )}
 
         <div className="form-group" style={{ marginBottom: 12 }}>
           <label className="form-label">Manager Name</label>
@@ -158,10 +144,31 @@ export default function Signup() {
           <input
             type="text"
             value={form.restaurant_name}
-            onChange={(e) => set("restaurant_name", e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              set("restaurant_name", v);
+              if (!slugTouched) set("slug", slugify(v));
+            }}
             placeholder="e.g. ZenTaap Bistro"
             data-testid="signup-restaurant-name"
           />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 12 }}>
+          <label className="form-label">Restaurant URL</label>
+          <input
+            type="text"
+            value={form.slug}
+            onChange={(e) => {
+              setSlugTouched(true);
+              set("slug", slugify(e.target.value));
+            }}
+            placeholder="my-bistro"
+            data-testid="signup-slug"
+          />
+          <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
+            Customers order at zentaapqr.com/r/{previewSlug}
+          </span>
         </div>
 
         <div className="form-group" style={{ marginBottom: 12 }}>
@@ -175,7 +182,7 @@ export default function Signup() {
             data-testid="signup-contact-number"
           />
           <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
-            Used to recover your PIN if you forget it.
+            Used to log in and recover your PIN.
           </span>
         </div>
 
