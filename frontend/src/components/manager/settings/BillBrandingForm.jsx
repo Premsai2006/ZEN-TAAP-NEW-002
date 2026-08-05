@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { ImageIcon, Save } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -36,14 +37,14 @@ export default function BillBrandingForm({ settings, onRefresh }) {
   const handleLogo = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 1_800_000) return toast.error("Logo too large (max 1.8MB)");
+    if (file.size > 1_800_000) return toast.error("That logo is too large. Please use one under 1.8 MB.");
     try {
       const data = await fileToDataUrl(file);
       const { data: res } = await api.post("/upload-image", { data });
       set("logo_url", res.url);
       toast.success("Logo uploaded");
-    } catch {
-      toast.error("Upload failed");
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't upload the logo. Please try again."));
     }
   };
 
@@ -56,7 +57,7 @@ export default function BillBrandingForm({ settings, onRefresh }) {
     } else {
       const parsed = parseFloat(form.gst_rate);
       if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
-        toast.error("GST rate must be a number between 0 and 100");
+        toast.error("GST rate should be a number between 0 and 100.");
         setSaving(false);
         return;
       }
@@ -66,8 +67,8 @@ export default function BillBrandingForm({ settings, onRefresh }) {
       await api.put("/settings", payload);
       toast.success("Settings saved");
       onRefresh();
-    } catch {
-      toast.error("Failed to save");
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't save settings. Please try again."));
     } finally {
       setSaving(false);
     }

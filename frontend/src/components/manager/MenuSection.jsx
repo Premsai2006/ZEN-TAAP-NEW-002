@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import MenuForm, { useMenuForm } from "./menu/MenuForm";
 import MenuItemCard from "./menu/MenuItemCard";
 import MenuSearchBar from "./menu/MenuSearchBar";
@@ -17,7 +18,9 @@ export default function MenuSection({ menu, categories, onRefresh, locked }) {
       toast.success("Item removed");
       onRefresh();
     } catch (err) {
-      if (err?.response?.status !== 402) toast.error(err?.response?.data?.detail || "Failed to delete");
+      if (err?.response?.status !== 402) {
+        toast.error(friendlyError(err, "Couldn't remove that item. Please try again."));
+      }
     }
   };
 
@@ -28,7 +31,9 @@ export default function MenuSection({ menu, categories, onRefresh, locked }) {
       toast.success(it.available ? "Marked Not Available" : "Marked Available");
       onRefresh();
     } catch (err) {
-      if (err?.response?.status !== 402) toast.error(err?.response?.data?.detail || "Failed to update");
+      if (err?.response?.status !== 402) {
+        toast.error(friendlyError(err, "Couldn't update that item. Please try again."));
+      }
     }
   };
 

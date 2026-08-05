@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Smartphone, LogOut as LogOutIcon } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 export default function DevicesCard() {
   const [sessions, setSessions] = useState([]);
@@ -26,14 +27,14 @@ export default function DevicesCard() {
   useEffect(() => { load(); }, []);
 
   const revoke = async (deviceId, isMe) => {
-    if (isMe) return toast.error("You can't sign out the current device here — use Logout.");
+    if (isMe) return toast.error("To sign out this device, use Logout instead.");
     setLoading(true);
     try {
       await api.delete(`/auth/sessions/${deviceId}`);
       toast.success("Device signed out");
       load();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to revoke");
+      toast.error(friendlyError(err, "Couldn't sign out that device. Please try again."));
     } finally {
       setLoading(false);
     }

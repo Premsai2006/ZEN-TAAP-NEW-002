@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Mail, Phone, Store, User as UserIcon, Save, CreditCard, Calendar, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 const fmtINR = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
@@ -44,7 +45,7 @@ export default function ProfileSection({ onRefresh }) {
       setEditing(false);
       onRefresh?.();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to save");
+      toast.error(friendlyError(err, "Couldn't save your profile. Please try again."));
     } finally {
       setSaving(false);
     }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ShoppingCart, Plus, Minus, X, Lock } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import { useInterval } from "@/hooks/useInterval";
 
 function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing }) {
@@ -18,7 +19,7 @@ function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing
   const removeLine = (id) => setCart((c) => c.filter((l) => l.id !== id));
 
   const handlePlace = () => {
-    if (cart.length === 0) return toast.error("Your cart is empty");
+    if (cart.length === 0) return toast.error("Your cart is empty. Add something tasty first.");
     onPlaceOrder(tableLocked);
   };
 
@@ -198,7 +199,7 @@ export default function Customer() {
       setCart([]);
       setDrawerOpen(false);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to place order");
+      toast.error(friendlyError(err, "Couldn't place your order. Please try again."));
     } finally {
       setPlacing(false);
     }

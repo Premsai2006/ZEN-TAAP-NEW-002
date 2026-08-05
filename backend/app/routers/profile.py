@@ -24,7 +24,7 @@ async def get_profile():
 async def update_profile(body: ProfileUpdate):
     update = body.model_dump(exclude_unset=True)
     if not update:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise HTTPException(status_code=400, detail="Nothing to save — make a change first.")
     await db.settings.update_one({"key": "manager_profile"}, {"$set": update}, upsert=True)
     if "restaurant_name" in update:
         await db.settings.update_one(

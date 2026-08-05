@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Printer } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import {
   GPayMark, PhonePeMark, PaytmMark, BHIMMark,
   VisaMark, MastercardMark, RuPayMark,
@@ -133,7 +134,7 @@ export default function Subscribe() {
   const printSubscribeQRs = () => {
     // Render all N QR codes off-screen into a hidden iframe-like print window.
     const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-    if (!w) return toast.error("Browser blocked the print window");
+    if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
     // Build SVG markup for each table using QRCodeSVG renderer.
     // We render N tiles into the live DOM (off-screen) and serialize them.
     const cards = Array.from({ length: tables }, (_, i) => i + 1)
@@ -202,7 +203,7 @@ export default function Subscribe() {
       }
       const ok = await loadRazorpayScript();
       if (!ok || !window.Razorpay) {
-        toast.error("Razorpay SDK failed to load — please retry.");
+        toast.error("Payment couldn't start. Please refresh the page and try again.");
         return;
       }
       const rzpOptions = {
@@ -226,7 +227,7 @@ export default function Subscribe() {
             toast.success("Payment successful — Autopay enabled for next cycles!");
             navigate("/manager");
           } catch (err) {
-            toast.error(err?.response?.data?.detail || "Payment verification failed");
+            toast.error(friendlyError(err, "We couldn't confirm your payment. Please try again or contact support."));
           }
         },
         modal: {
@@ -235,7 +236,7 @@ export default function Subscribe() {
       };
       new window.Razorpay(rzpOptions).open();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to subscribe");
+      toast.error(friendlyError(err, "Couldn't start your subscription. Please try again."));
     } finally {
       setPaying(false);
     }

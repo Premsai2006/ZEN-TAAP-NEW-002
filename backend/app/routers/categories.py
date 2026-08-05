@@ -16,10 +16,10 @@ async def list_categories():
 async def create_category(body: CategoryCreate):
     name = body.name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Name required")
+        raise HTTPException(status_code=400, detail="Please enter a category name.")
     existing = await db.categories.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}}, {"_id": 0})
     if existing:
-        raise HTTPException(status_code=400, detail="Category already exists")
+        raise HTTPException(status_code=400, detail="A category with that name already exists.")
     slug = name.lower().replace(" ", "-").replace("&", "and")
     cat = Category(name=name, slug=slug)
     await db.categories.insert_one(cat.model_dump())
@@ -30,15 +30,15 @@ async def create_category(body: CategoryCreate):
 async def rename_category(cat_id: str, body: CategoryCreate):
     name = body.name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Name required")
+        raise HTTPException(status_code=400, detail="Please enter a category name.")
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
     if not cat:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="That category was not found.")
     dup = await db.categories.find_one(
         {"id": {"$ne": cat_id}, "name": {"$regex": f"^{name}$", "$options": "i"}}, {"_id": 0}
     )
     if dup:
-        raise HTTPException(status_code=400, detail="Another category with that name exists")
+        raise HTTPException(status_code=400, detail="A category with that name already exists.")
     slug = name.lower().replace(" ", "-").replace("&", "and")
     old_name = cat["name"]
     await db.categories.update_one({"id": cat_id}, {"$set": {"name": name, "slug": slug}})
@@ -50,7 +50,7 @@ async def rename_category(cat_id: str, body: CategoryCreate):
 async def delete_category(cat_id: str):
     cat = await db.categories.find_one({"id": cat_id}, {"_id": 0})
     if not cat:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="That category was not found.")
     await db.menu_items.update_many({"category": cat["name"]}, {"$set": {"category": ""}})
     await db.categories.delete_one({"id": cat_id})
     return {"success": True}

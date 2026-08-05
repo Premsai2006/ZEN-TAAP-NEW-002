@@ -25,7 +25,7 @@ export default function TablesSection({ orders, subscription }) {
 
   const downloadOneQR = (n) => {
     const el = document.querySelector(`[data-qr-svg="${n}"] svg`);
-    if (!el) return toast.error("QR not ready");
+    if (!el) return toast.error("QR code isn't ready yet. Please try again.");
     const svg = new XMLSerializer().serializeToString(el);
     const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -39,7 +39,7 @@ export default function TablesSection({ orders, subscription }) {
 
   const printAllQRs = () => {
     const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-    if (!w) return toast.error("Browser blocked the print window");
+    if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
     const cards = Array.from({ length: tableCount }, (_, i) => i + 1)
       .map(
         (n) => `

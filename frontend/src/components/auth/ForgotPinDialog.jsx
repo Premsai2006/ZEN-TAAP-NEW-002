@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import { Phone, ShieldCheck, KeyRound } from "lucide-react";
 import {
   AlertDialog,
@@ -34,7 +35,7 @@ export default function ForgotPinDialog({ open, onClose }) {
 
   const sendOtp = async () => {
     if (contact.replace(/[^0-9]/g, "").length < 7) {
-      return toast.error("Enter your registered phone number");
+      return toast.error("Please enter the phone number on your account.");
     }
     setLoading(true);
     try {
@@ -45,27 +46,27 @@ export default function ForgotPinDialog({ open, onClose }) {
       if (data.demo_otp) {
         toast.success(`Demo OTP: ${data.demo_otp}`, { duration: 10000 });
       } else {
-        toast.success(data.message || "OTP sent");
+        toast.success(data.message || "Code sent to your phone.");
       }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not send OTP");
+      toast.error(friendlyError(err, "Couldn't send the code. Please try again."));
     } finally {
       setLoading(false);
     }
   };
 
   const verifyAndReset = async () => {
-    if (otp.length !== 6) return toast.error("Enter the 6-digit OTP");
-    if (newPin.length < 6) return toast.error("New PIN must be at least 6 digits");
-    if (newPin !== confirmPin) return toast.error("PINs do not match");
+    if (otp.length !== 6) return toast.error("Please enter the 6-digit code we sent you.");
+    if (newPin.length < 6) return toast.error("Your new PIN needs to be at least 6 digits.");
+    if (newPin !== confirmPin) return toast.error("Your PINs don't match — please try again.");
     setLoading(true);
     try {
       await api.post("/auth/verify-otp", { contact_number: contact, otp, new_pin: newPin });
-      toast.success("PIN reset successfully — please log in with your new PIN");
+      toast.success("PIN updated — you can log in with your new PIN.");
       reset();
       onClose?.();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not reset PIN");
+      toast.error(friendlyError(err, "Couldn't reset your PIN. Please try again."));
     } finally {
       setLoading(false);
     }

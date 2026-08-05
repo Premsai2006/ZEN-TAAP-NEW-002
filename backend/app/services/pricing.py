@@ -4,7 +4,10 @@ from app.config import BASE_FEE, PER_TABLE, GST_RATE, MIN_TABLES, MAX_TABLES
 
 def compute_price(tables: int) -> dict:
     if tables < MIN_TABLES or tables > MAX_TABLES:
-        raise HTTPException(status_code=400, detail=f"Tables must be between {MIN_TABLES} and {MAX_TABLES}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Please choose between {MIN_TABLES} and {MAX_TABLES} tables.",
+        )
     subtotal = round(BASE_FEE + PER_TABLE * tables, 2)
     gst = round(subtotal * GST_RATE, 2)
     total = round(subtotal + gst, 2)

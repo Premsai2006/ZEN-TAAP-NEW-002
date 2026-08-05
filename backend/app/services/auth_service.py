@@ -18,20 +18,20 @@ def digits(s: str) -> str:
 def validate_pin(pin: str, *, new: bool = False):
     """Validate PIN. new=True enforces 6–10 for signup/change/OTP; login uses legacy 4–10."""
     if not pin or not pin.isdigit():
-        raise HTTPException(status_code=400, detail="PIN must be numeric")
+        raise HTTPException(status_code=400, detail="Your PIN can only contain numbers.")
     mn = PIN_MIN_NEW if new else PIN_MIN_LEGACY
     if len(pin) < mn or len(pin) > PIN_MAX:
         raise HTTPException(
             status_code=400,
-            detail=f"PIN must be {mn}-{PIN_MAX} digits",
+            detail=f"Your PIN must be {mn}–{PIN_MAX} digits.",
         )
 
 
 def validate_short_pin(pin: str, label: str = "PIN"):
     if not pin or not pin.isdigit():
-        raise HTTPException(status_code=400, detail=f"{label} must be digits only")
+        raise HTTPException(status_code=400, detail=f"{label} can only contain numbers.")
     if len(pin) < 4 or len(pin) > 6:
-        raise HTTPException(status_code=400, detail=f"{label} must be 4–6 digits")
+        raise HTTPException(status_code=400, detail=f"{label} must be 4–6 digits.")
 
 
 async def get_profile():
@@ -71,7 +71,7 @@ async def check_login_lockout(request: Request):
             mins = max(1, int((until - now).total_seconds() // 60) + 1)
             raise HTTPException(
                 status_code=429,
-                detail=f"Too many incorrect PIN attempts. Try again in {mins} minute(s).",
+                detail=f"Too many incorrect attempts. Try again in {mins} minute(s).",
             )
         # Lock expired — clear
         await db.login_attempts.delete_one({"key": key})
@@ -91,7 +91,7 @@ async def record_login_failure(request: Request):
     if count >= MAX_PIN_ATTEMPTS:
         raise HTTPException(
             status_code=429,
-            detail=f"Too many incorrect PIN attempts. Locked for {LOCKOUT_MINUTES} minutes.",
+            detail=f"Too many incorrect attempts. Locked for {LOCKOUT_MINUTES} minutes.",
         )
     raise HTTPException(
         status_code=401,

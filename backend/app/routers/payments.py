@@ -71,8 +71,11 @@ async def verify_razorpay_payment(body: VerifyPaymentBody):
                 "razorpay_payment_id": body.razorpay_payment_id,
                 "razorpay_signature": body.razorpay_signature,
             })
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Signature verification failed: {e}")
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="Payment could not be verified. Please try again or contact support.",
+            )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     update = {
@@ -99,8 +102,8 @@ async def razorpay_webhook(request: Request):
     if client and RAZORPAY_WEBHOOK_SECRET and sig:
         try:
             client.utility.verify_webhook_signature(payload.decode(), sig, RAZORPAY_WEBHOOK_SECRET)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Webhook signature invalid: {e}")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Payment webhook could not be verified.")
     try:
         import json as _json
         data = _json.loads(payload.decode() or "{}")

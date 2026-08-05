@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 const MAX_IMAGES = 4;
 const initialForm = { name: "", price: "", cost_price: "", category: "", images: [] };
@@ -43,18 +44,21 @@ export default function MenuForm({ formState, categories, onRefresh }) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const remaining = MAX_IMAGES - form.images.length;
-    if (remaining <= 0) { toast.error(`Max ${MAX_IMAGES} photos`); return; }
+    if (remaining <= 0) { toast.error(`You can add up to ${MAX_IMAGES} photos.`); return; }
     const toUpload = files.slice(0, remaining);
     setUploading(true);
     const uploaded = [];
     for (const f of toUpload) {
-      if (f.size > 1_800_000) { toast.error(`${f.name} is too large (max 1.8MB)`); continue; }
+      if (f.size > 1_800_000) {
+        toast.error(`${f.name} is too large. Please use a photo under 1.8 MB.`);
+        continue;
+      }
       try {
         const data = await fileToDataUrl(f);
         const { data: res } = await api.post("/upload-image", { data });
         uploaded.push(res.url);
-      } catch {
-        toast.error(`${f.name} upload failed`);
+      } catch (err) {
+        toast.error(friendlyError(err, `Couldn't upload ${f.name}. Please try again.`));
       }
     }
     if (uploaded.length) {
@@ -69,7 +73,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.price) { toast.error("Name and price are required"); return; }
+    if (!form.name || !form.price) { toast.error("Please enter a name and price."); return; }
     const payload = {
       name: form.name.trim(),
       price: parseFloat(form.price),
@@ -89,7 +93,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
       reset();
       onRefresh();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
+      toast.error(friendlyError(err, "Couldn't save this menu item. Please try again."));
     }
   };
 
@@ -104,7 +108,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
       toast.success("Category added");
       onRefresh();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
+      toast.error(friendlyError(err, "Couldn't add that category. Please try again."));
     }
   };
 
@@ -115,7 +119,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
     if (!newName || !newName.trim() || newName.trim() === cat.name) return;
     api.put(`/categories/${cat.id}`, { name: newName.trim() })
       .then(() => { toast.success("Category renamed"); set("category", newName.trim()); onRefresh(); })
-      .catch((err) => toast.error(err?.response?.data?.detail || "Failed"));
+      .catch((err) => toast.error(friendlyError(err, "Couldn't rename that category. Please try again.")));
   };
 
   const deleteSelectedCat = () => {
@@ -124,7 +128,7 @@ export default function MenuForm({ formState, categories, onRefresh }) {
     if (!window.confirm(`Delete "${cat.name}"? Items in this category will become Uncategorized.`)) return;
     api.delete(`/categories/${cat.id}`)
       .then(() => { toast.success("Category removed"); set("category", ""); onRefresh(); })
-      .catch(() => toast.error("Failed"));
+      .catch((err) => toast.error(friendlyError(err, "Couldn't remove that category. Please try again.")));
   };
 
   const hasContent = form.name || form.price || form.images.length || form.category;

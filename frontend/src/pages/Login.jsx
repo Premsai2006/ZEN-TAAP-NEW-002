@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff, UtensilsCrossed, ChefHat, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
 
 export default function Login() {
@@ -32,15 +33,15 @@ export default function Login() {
     e.preventDefault();
     if (lockedUntil && Date.now() < lockedUntil) {
       const mins = Math.ceil((lockedUntil - Date.now()) / 60000);
-      toast.error(`Too many attempts. Try again in ${mins} minute(s).`);
+      toast.error(`Too many attempts. Please try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       return;
     }
     if (contact.replace(/[^0-9]/g, "").length < 7) {
-      toast.error("Enter your registered phone number");
+      toast.error("Please enter the phone number on your account.");
       return;
     }
     if (!pin || pin.length < 4) {
-      toast.error("Enter your PIN (at least 4 digits)");
+      toast.error("Please enter your PIN.");
       return;
     }
     setLoading(true);
@@ -74,12 +75,10 @@ export default function Login() {
       }
       navigate("/manager");
     } catch (err) {
-      const status = err?.response?.status;
-      const detail = err?.response?.data?.detail || "Login failed";
-      if (status === 429) {
+      if (err?.response?.status === 429) {
         setLockedUntil(Date.now() + 15 * 60 * 1000);
       }
-      toast.error(detail);
+      toast.error(friendlyError(err, "Couldn't log you in. Please try again."));
     } finally {
       setLoading(false);
     }

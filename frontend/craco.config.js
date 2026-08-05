@@ -1,6 +1,10 @@
 // craco.config.js
 const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, ".env.dev") });
+// Production builds must NOT load .env.dev (it points at localhost and gets
+// baked into the CRA bundle via REACT_APP_*). Dev defaults first, then .env.
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config({ path: path.resolve(__dirname, ".env.dev") });
+}
 require("dotenv").config({ path: path.resolve(__dirname, ".env"), override: true });
 
 // Environment variable overrides

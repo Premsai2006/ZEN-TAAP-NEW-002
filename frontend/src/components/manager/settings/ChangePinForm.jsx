@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { KeyRound } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 export default function ChangePinForm() {
   const [oldPin, setOldPin] = useState("");
@@ -11,16 +12,16 @@ export default function ChangePinForm() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!oldPin || !newPin) return toast.error("Fill both PIN fields");
-    if (newPin.length < 6) return toast.error("New PIN must be at least 6 digits");
-    if (newPin !== confirmPin) return toast.error("PINs do not match");
+    if (!oldPin || !newPin) return toast.error("Please enter your current and new PIN.");
+    if (newPin.length < 6) return toast.error("Your new PIN needs to be at least 6 digits.");
+    if (newPin !== confirmPin) return toast.error("Your PINs don't match — please try again.");
     setSaving(true);
     try {
       await api.post("/auth/change-pin", { old_pin: oldPin, new_pin: newPin });
       toast.success("PIN updated");
       setOldPin(""); setNewPin(""); setConfirmPin("");
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
+      toast.error(friendlyError(err, "Couldn't update your PIN. Please try again."));
     } finally {
       setSaving(false);
     }

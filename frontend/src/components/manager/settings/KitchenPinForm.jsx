@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Save, ChefHat, Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 export default function KitchenPinForm() {
   const [kitchenPin, setKitchenPin] = useState("");
@@ -19,8 +20,10 @@ export default function KitchenPinForm() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!newKitchenPin) return toast.error("Enter a new Kitchen PIN");
-    if (newKitchenPin.length < 4 || newKitchenPin.length > 6) return toast.error("Kitchen PIN must be 4–6 digits");
+    if (!newKitchenPin) return toast.error("Please enter a new kitchen PIN.");
+    if (newKitchenPin.length < 4 || newKitchenPin.length > 6) {
+      return toast.error("Kitchen PIN must be 4 to 6 digits.");
+    }
     setSaving(true);
     try {
       await api.put("/settings/kitchen-pin", { new_pin: newKitchenPin });
@@ -28,7 +31,7 @@ export default function KitchenPinForm() {
       setKitchenPin(newKitchenPin);
       setNewKitchenPin("");
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed to update");
+      toast.error(friendlyError(err, "Couldn't update the kitchen PIN. Please try again."));
     } finally {
       setSaving(false);
     }

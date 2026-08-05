@@ -33,10 +33,10 @@ def clear_manager_cookie(response: Response) -> None:
 async def require_manager(request: Request):
     token = extract_manager_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Missing manager token")
+        raise HTTPException(status_code=401, detail="Please log in to continue.")
     sess = await db.sessions.find_one({"scope": "manager", "token": token})
     if not sess:
-        raise HTTPException(status_code=401, detail="Session expired — please log in again")
+        raise HTTPException(status_code=401, detail="Session expired — please log in again.")
     await db.sessions.update_one(
         {"_id": sess["_id"]},
         {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},

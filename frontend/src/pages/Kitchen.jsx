@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ChefHat, ArrowLeft, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import { useInterval } from "@/hooks/useInterval";
 
 const KITCHEN_TOKEN_KEY = "kitchen_token";
@@ -14,14 +15,14 @@ function KitchenPinGate({ onUnlock }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!pin) return toast.error("Enter the Kitchen PIN");
+    if (!pin) return toast.error("Please enter the kitchen PIN.");
     setLoading(true);
     try {
       const { data } = await api.post("/auth/kitchen-login", { pin });
       localStorage.setItem(KITCHEN_TOKEN_KEY, data.token);
       onUnlock();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Incorrect PIN");
+      toast.error(friendlyError(err, "That kitchen PIN is incorrect. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -123,7 +124,7 @@ export default function Kitchen() {
       setOrders(data);
       if (manual) toast.success("Refreshed");
     } catch {
-      if (manual) toast.error("Could not refresh");
+      if (manual) toast.error("Couldn't refresh orders. Please try again.");
     } finally {
       if (manual) setTimeout(() => setRefreshing(false), 350);
     }
@@ -157,7 +158,7 @@ export default function Kitchen() {
       toast.success(`Order #${o.order_number} → ${nxt}`);
       refresh();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Failed");
+      toast.error(friendlyError(err, "Couldn't update that order. Please try again."));
     }
   };
 

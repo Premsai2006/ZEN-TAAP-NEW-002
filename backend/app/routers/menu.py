@@ -32,12 +32,12 @@ async def create_menu(body: MenuItemCreate):
 async def update_menu(item_id: str, body: MenuItemUpdate):
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise HTTPException(status_code=400, detail="Nothing to save — make a change first.")
     if "images" in update and "image_url" not in update:
         update["image_url"] = update["images"][0] if update["images"] else ""
     res = await db.menu_items.update_one({"id": item_id}, {"$set": update})
     if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="That menu item was not found.")
     item = await db.menu_items.find_one({"id": item_id}, {"_id": 0})
     if "images" not in item or item.get("images") is None:
         item["images"] = [item["image_url"]] if item.get("image_url") else []
@@ -48,5 +48,5 @@ async def update_menu(item_id: str, body: MenuItemUpdate):
 async def delete_menu(item_id: str):
     res = await db.menu_items.delete_one({"id": item_id})
     if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="That menu item was not found.")
     return {"success": True}

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { toast } from "sonner";
+import { friendlyError } from "@/lib/errors";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -45,9 +46,10 @@ api.interceptors.response.use(
       }
     }
     if (status === 402) {
-      const raw = err.response?.data?.detail;
-      const msg = typeof raw === "string" ? raw : "Subscribe to ZenTaap to use this feature.";
-      toast.error(msg, { duration: 5000, id: "sub-required" });
+      toast.error(friendlyError(err, "Subscribe to ZenTaap to use this feature."), {
+        duration: 5000,
+        id: "sub-required",
+      });
       // Soft redirect — give the user time to read the toast (issue #3)
       if (typeof window !== "undefined" && !_redirecting) {
         const path = window.location.pathname;
@@ -58,8 +60,9 @@ api.interceptors.response.use(
       }
     }
     if (status === 429) {
-      const msg = err.response?.data?.detail || "Too many attempts. Please wait and try again.";
-      toast.error(typeof msg === "string" ? msg : "Too many attempts.", { duration: 6000 });
+      toast.error(friendlyError(err, "Too many attempts. Please wait and try again."), {
+        duration: 6000,
+      });
     }
     return Promise.reject(err);
   }

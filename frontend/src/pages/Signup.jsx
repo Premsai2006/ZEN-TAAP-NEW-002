@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
 const PinInput = ({ value, onChange, testId, autoFocus }) => {
   const [show, setShow] = useState(false);
@@ -77,14 +78,14 @@ export default function Signup() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.manager_name.trim()) return toast.error("Manager name is required");
-    if (!form.restaurant_name.trim()) return toast.error("Restaurant name is required");
+    if (!form.manager_name.trim()) return toast.error("Please enter the manager's name.");
+    if (!form.restaurant_name.trim()) return toast.error("Please enter your restaurant name.");
     const digits = form.contact_number.replace(/[^0-9]/g, "");
-    if (digits.length < 7) return toast.error("Enter a valid contact number");
-    if (form.pin.length < 6) return toast.error("PIN must be at least 6 digits");
-    if (form.pin !== form.confirm_pin) return toast.error("PINs do not match");
+    if (digits.length < 7) return toast.error("Please enter a valid phone number.");
+    if (form.pin.length < 6) return toast.error("Your PIN needs to be at least 6 digits.");
+    if (form.pin !== form.confirm_pin) return toast.error("Your PINs don't match — please try again.");
     if (accountExists) {
-      return toast.error("This deployment already has a restaurant. Please log in instead.");
+      return toast.error("A restaurant is already set up here. Please log in instead.");
     }
     setLoading(true);
     try {
@@ -96,10 +97,10 @@ export default function Signup() {
         pin: form.pin,
       });
       localStorage.setItem("mgr_token", data.token);
-      toast.success("Account created — set up your subscription");
+      toast.success("Account created — next, choose your plan.");
       navigate("/subscribe");
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Signup failed");
+      toast.error(friendlyError(err, "Couldn't create your account. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -134,9 +135,9 @@ export default function Signup() {
               textAlign: "center",
             }}
           >
-            This ZenTaap deployment already has a restaurant registered.
-            Each install supports one restaurant — use a separate deployment for another venue.{" "}
-            <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>Login here</a>.
+            A restaurant is already registered here. Only one restaurant can use this account —{" "}
+            <a href="/login" style={{ color: "var(--gold)", fontWeight: 600 }}>log in</a>
+            {" "}instead.
           </div>
         )}
 

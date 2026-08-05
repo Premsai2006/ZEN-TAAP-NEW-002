@@ -21,7 +21,7 @@ async def get_settings():
 async def update_settings(body: SettingsUpdate):
     update = body.model_dump(exclude_unset=True)
     if not update:
-        raise HTTPException(status_code=400, detail="No fields to update")
+        raise HTTPException(status_code=400, detail="Nothing to save — make a change first.")
     await db.settings.update_one({"key": "restaurant"}, {"$set": update}, upsert=True)
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0})
     doc.pop("key", None)

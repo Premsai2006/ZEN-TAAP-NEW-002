@@ -126,7 +126,7 @@ async def get_subscription():
 @router.post("/subscription")
 async def create_subscription(body: SubscribeBody):
     if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
-        raise HTTPException(status_code=400, detail="Invalid payment method")
+        raise HTTPException(status_code=400, detail="Please choose a valid payment option.")
     price = compute_price(body.tables)
     now = datetime.now(timezone.utc)
     existing = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}

@@ -62,7 +62,7 @@ class TestManagerAuth:
     def test_profile_put_no_token_returns_401(self, no_auth_http):
         r = no_auth_http.put(f"{API}/profile", json={"manager_name": "X"})
         assert r.status_code == 401
-        assert "Missing manager token" in r.json().get("detail", "")
+        assert "Please log in" in r.json().get("detail", "")
 
     def test_profile_put_invalid_token_returns_401(self, no_auth_http):
         r = no_auth_http.put(f"{API}/profile",

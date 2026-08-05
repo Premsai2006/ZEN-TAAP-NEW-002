@@ -33,18 +33,15 @@ async def signup(req: SignupRequest):
     if existing and existing.get("pin"):
         raise HTTPException(
             status_code=400,
-            detail=(
-                "This ZenTaap deployment already has a restaurant registered. "
-                "Multi-restaurant hosting requires a separate deployment. Please log in instead."
-            ),
+            detail="A restaurant is already set up here. Please log in instead.",
         )
     if not req.manager_name.strip():
-        raise HTTPException(status_code=400, detail="Manager name required")
+        raise HTTPException(status_code=400, detail="Please enter the manager's name.")
     if not req.restaurant_name.strip():
-        raise HTTPException(status_code=400, detail="Restaurant name required")
+        raise HTTPException(status_code=400, detail="Please enter your restaurant name.")
     digs = auth.digits(req.contact_number)
     if len(digs) < 7:
-        raise HTTPException(status_code=400, detail="Valid contact number required")
+        raise HTTPException(status_code=400, detail="Please enter a valid phone number.")
     auth.validate_pin(req.pin, new=True)
 
     profile = {
@@ -70,7 +67,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
     auth.validate_pin(req.pin, new=False)
     stored = await auth.get_stored_pin()
     if not stored:
-        raise HTTPException(status_code=404, detail="No manager registered. Please sign up first.")
+        raise HTTPException(status_code=404, detail="No account found yet. Please sign up first.")
 
     # Optional contact verification — when provided (or required by FE), must match.
     p = await auth.get_profile()
@@ -78,7 +75,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         if not await auth.contact_matches(req.contact_number):
             await auth.record_login_failure(request)
     elif p and p.get("contact_number") and req.contact_number is not None and req.contact_number == "":
-        raise HTTPException(status_code=400, detail="Contact number required")
+        raise HTTPException(status_code=400, detail="Please enter your phone number.")
 
     if req.pin != stored:
         await auth.record_login_failure(request)
@@ -114,7 +111,7 @@ async def list_sessions():
 async def revoke_session(device_id: str):
     r = await db.sessions.delete_many({"scope": "manager", "device_id": device_id})
     if r.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="That device was already signed out.")
     return {"success": True}
 
 
@@ -122,9 +119,9 @@ async def revoke_session(device_id: str):
 async def change_pin(req: ChangePinRequest):
     stored = await auth.get_stored_pin()
     if not stored:
-        raise HTTPException(status_code=404, detail="No manager registered")
+        raise HTTPException(status_code=404, detail="No account found yet. Please sign up first.")
     if req.old_pin != stored:
-        raise HTTPException(status_code=401, detail="Current PIN is incorrect")
+        raise HTTPException(status_code=401, detail="Current PIN is incorrect. Please try again.")
     auth.validate_pin(req.new_pin, new=True)
     await db.settings.update_one(
         {"key": "manager_profile"}, {"$set": {"pin": req.new_pin}}, upsert=True
@@ -137,7 +134,7 @@ async def recover_pin(req: RecoverPinRequest):
     """Deprecated insecure path — OTP verification is required."""
     raise HTTPException(
         status_code=410,
-        detail="PIN recovery requires OTP verification. Use Forgot PIN on the login screen.",
+        detail="PIN recovery now uses OTP. Please use Forgot PIN on the login screen.",
     )
 
 
@@ -145,11 +142,11 @@ async def recover_pin(req: RecoverPinRequest):
 async def request_otp(body: RequestOtpBody):
     p = await auth.get_profile()
     if not p or not p.get("contact_number"):
-        raise HTTPException(status_code=404, detail="No manager phone number on record")
+        raise HTTPException(status_code=404, detail="No phone number is saved on this account.")
     saved = auth.digits(p.get("contact_number"))
     given = auth.digits(body.contact_number)
     if not saved or saved[-7:] != given[-7:]:
-        raise HTTPException(status_code=401, detail="Phone number does not match our records")
+        raise HTTPException(status_code=401, detail="That phone number does not match our records.")
     otp = f"{secrets.randbelow(1_000_000):06d}"
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     await db.otps.update_one(
@@ -158,7 +155,7 @@ async def request_otp(body: RequestOtpBody):
         upsert=True,
     )
     masked = f"+91 •••••{saved[-4:]}" if len(saved) >= 4 else "your phone"
-    resp = {"success": True, "message": f"OTP sent to {masked}"}
+    resp = {"success": True, "message": f"Code sent to {masked}"}
     if DEMO_MODE:
         resp["demo_otp"] = otp
     return resp
@@ -176,9 +173,9 @@ async def verify_otp(body: VerifyOtpBody):
     if datetime.now(timezone.utc) > expires:
         raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
     if rec.get("contact_last7") != auth.digits(body.contact_number)[-7:]:
-        raise HTTPException(status_code=401, detail="Phone number mismatch")
+        raise HTTPException(status_code=401, detail="That phone number does not match our records.")
     if rec.get("otp") != body.otp.strip():
-        raise HTTPException(status_code=401, detail="Incorrect OTP")
+        raise HTTPException(status_code=401, detail="Incorrect OTP. Please try again.")
     auth.validate_pin(body.new_pin, new=True)
     await db.settings.update_one(
         {"key": "manager_profile"}, {"$set": {"pin": body.new_pin}}, upsert=True
@@ -192,9 +189,9 @@ async def kitchen_login(body: KitchenLoginBody):
     doc = await db.settings.find_one({"key": "restaurant"}, {"_id": 0}) or {}
     expected = doc.get("kitchen_pin") or ""
     if not expected:
-        raise HTTPException(status_code=404, detail="Kitchen PIN not set yet. Ask your manager to configure it.")
+        raise HTTPException(status_code=404, detail="Kitchen PIN is not set yet. Ask your manager to set one up.")
     if body.pin != expected:
-        raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN")
+        raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN. Please try again.")
     return {"success": True, "token": f"kitchen-{uuid.uuid4()}"}
 
 

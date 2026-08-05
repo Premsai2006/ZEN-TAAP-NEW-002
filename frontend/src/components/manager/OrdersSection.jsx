@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import BillModal from "@/components/manager/BillModal";
 
 const STATUSES = ["all", "new", "cooking", "done", "delivered"];
@@ -82,7 +83,7 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
       onRefresh();
     } catch (err) {
       if (err?.response?.status !== 402) {
-        toast.error(err?.response?.data?.detail || "Failed to update order");
+        toast.error(friendlyError(err, "Couldn't update that order. Please try again."));
       }
     }
   };
