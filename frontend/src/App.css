@@ -1653,6 +1653,7 @@ tr:last-child td { border-bottom: none; }
 .cart-fab {
   position: fixed;
   bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   background: var(--gold);
@@ -1667,14 +1668,13 @@ tr:last-child td { border-bottom: none; }
   gap: 10px;
   cursor: pointer;
   box-shadow: 0 12px 30px rgba(232,125,47,0.45);
-  z-index: 100001;
+  z-index: 90;
   transition: transform 0.15s, box-shadow 0.2s;
 }
 .cart-fab:hover {
   transform: translateX(-50%) translateY(-2px);
   box-shadow: 0 18px 40px rgba(232,125,47,0.5);
 }
-.cart-fab:hover { transform: translateY(-2px); }
 .cart-fab-badge {
   background: white;
   color: var(--gold);

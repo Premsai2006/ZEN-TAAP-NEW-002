@@ -341,7 +341,7 @@ export default function Customer() {
         )}
       </div>
 
-      {cartCount > 0 && (
+      {cartCount > 0 && !drawerOpen && (
         <button
           type="button"
           className="cart-fab"
