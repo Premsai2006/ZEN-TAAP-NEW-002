@@ -23,16 +23,27 @@ export default function BillModal({ order, settings, onClose }) {
   const handlePrint = () => {
     const el = printRef.current;
     if (!el) {
-      window.print();
+      toast.error("Bill preview isn't ready yet. Try again.");
       return;
     }
-    const w = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
-    if (!w) {
-      toast.error("Please allow pop-ups to print or download the bill.");
+
+    // Hidden iframe — no popup (Chrome returns null for window.open + noopener).
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("title", `Bill ${billNo}`);
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;";
+    document.body.appendChild(iframe);
+
+    const win = iframe.contentWindow;
+    const doc = win?.document;
+    if (!win || !doc) {
+      iframe.remove();
+      toast.error("Couldn't open the print dialog. Try again.");
       return;
     }
+
     const title = `Bill ${billNo}`;
-    w.document.write(`<!doctype html>
+    doc.open();
+    doc.write(`<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -62,22 +73,45 @@ export default function BillModal({ order, settings, onClose }) {
 </head>
 <body>${el.innerHTML}</body>
 </html>`);
-    w.document.close();
+    doc.close();
+
+    const cleanup = () => {
+      try { iframe.remove(); } catch { /* ignore */ }
+    };
+
     const doPrint = () => {
       try {
-        w.focus();
-        w.print();
-      } finally {
-        setTimeout(() => {
-          try { w.close(); } catch { /* ignore */ }
-        }, 400);
+        win.focus();
+        win.print();
+      } catch {
+        toast.error("Couldn't open the print dialog. Try again.");
+        cleanup();
+        return;
       }
+      // Keep iframe until print dialog closes (Save as PDF / print).
+      if (typeof win.onafterprint !== "undefined") {
+        win.onafterprint = cleanup;
+      }
+      setTimeout(cleanup, 60_000);
     };
-    if (w.document.readyState === "complete") {
-      setTimeout(doPrint, 250);
-    } else {
-      w.onload = () => setTimeout(doPrint, 250);
-    }
+
+    // Wait for layout (and logo image if present) before printing.
+    const imgs = Array.from(doc.images || []);
+    const waitImages = imgs.length
+      ? Promise.all(
+          imgs.map(
+            (img) =>
+              img.complete
+                ? Promise.resolve()
+                : new Promise((resolve) => {
+                    img.onload = resolve;
+                    img.onerror = resolve;
+                  })
+          )
+        )
+      : Promise.resolve();
+
+    waitImages.then(() => setTimeout(doPrint, 150));
   };
 
   const buildWhatsAppMessage = () => {
