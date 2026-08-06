@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Mail, Phone, Store, User as UserIcon, Save, CreditCard, Calendar, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import { slugify, isValidSlug } from "@/lib/slug";
 
 const fmtINR = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
@@ -48,10 +49,14 @@ export default function ProfileSection({ onRefresh }) {
 
   const save = async (e) => {
     e.preventDefault();
+    if (profile.slug && !isValidSlug(slugify(profile.slug))) {
+      return toast.error("Restaurant URL can only use letters, numbers, and hyphens (min 2 characters).");
+    }
     setSaving(true);
     try {
-      await api.put("/profile", profile);
-      if (profile.slug) localStorage.setItem("mgr_slug", profile.slug);
+      const payload = { ...profile, slug: profile.slug ? slugify(profile.slug) : profile.slug };
+      await api.put("/profile", payload);
+      if (payload.slug) localStorage.setItem("mgr_slug", payload.slug);
       toast.success("Profile updated");
       setEditing(false);
       onRefresh?.();
@@ -297,12 +302,20 @@ export default function ProfileSection({ onRefresh }) {
             <input
               type="text"
               value={profile.slug || ""}
-              onChange={(e) => set("slug", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              onChange={(e) => set("slug", slugify(e.target.value))}
+              onPaste={(e) => {
+                e.preventDefault();
+                set("slug", slugify(e.clipboardData.getData("text")));
+              }}
               placeholder="my-bistro"
+              autoComplete="off"
+              spellCheck={false}
+              pattern="[a-z0-9-]*"
+              title="Only lowercase letters, numbers, and hyphens"
               data-testid="profile-slug-input"
             />
             <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
-              Ordering link: zentaapqr.com/r/{profile.slug || "…"}
+              Letters, numbers, and hyphens only — zentaapqr.com/r/{profile.slug || "…"}
             </span>
           </div>
           <div className="form-row">

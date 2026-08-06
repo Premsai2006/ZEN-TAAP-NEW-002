@@ -10,7 +10,9 @@ const KITCHEN_TOKEN_KEY = "kitchen_token";
 
 function KitchenPinGate({ slug, onUnlock }) {
   const [pin, setPin] = useState("");
-  const [slugInput, setSlugInput] = useState(slug || "");
+  const [slugInput, setSlugInput] = useState(
+    slug || (typeof window !== "undefined" ? localStorage.getItem("mgr_slug") || localStorage.getItem("kitchen_slug") || "" : "")
+  );
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -63,11 +65,23 @@ function KitchenPinGate({ slug, onUnlock }) {
             <input
               type="text"
               value={slugInput}
-              onChange={(e) => setSlugInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              onChange={(e) => setSlugInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-"))}
+              onPaste={(e) => {
+                e.preventDefault();
+                const t = e.clipboardData.getData("text").toLowerCase().replace(/[''`]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+                setSlugInput(t);
+              }}
               placeholder="my-bistro"
+              autoComplete="off"
+              spellCheck={false}
+              pattern="[a-z0-9-]*"
+              title="Only lowercase letters, numbers, and hyphens"
               data-testid="kitchen-slug-input"
               style={{ width: "100%", padding: "10px 12px", background: "var(--bg)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8 }}
             />
+            <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
+              Letters, numbers, hyphens only — same as Manager → Profile (zentaapqr.com/r/<b>your-url</b>)
+            </span>
           </div>
         )}
 

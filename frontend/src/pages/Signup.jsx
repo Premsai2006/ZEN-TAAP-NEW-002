@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import { slugify, isValidSlug } from "@/lib/slug";
 
 const PinInput = ({ value, onChange, testId, autoFocus }) => {
   const [show, setShow] = useState(false);
@@ -54,14 +55,6 @@ const PinInput = ({ value, onChange, testId, autoFocus }) => {
   );
 };
 
-const slugify = (s) =>
-  (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
-
 export default function Signup() {
   const [form, setForm] = useState({
     manager_name: "",
@@ -83,7 +76,9 @@ export default function Signup() {
     if (!form.manager_name.trim()) return toast.error("Please enter the manager's name.");
     if (!form.restaurant_name.trim()) return toast.error("Please enter your restaurant name.");
     const slug = slugify(form.slug || form.restaurant_name);
-    if (slug.length < 2) return toast.error("Please choose a URL name for your restaurant.");
+    if (!isValidSlug(slug)) {
+      return toast.error("Restaurant URL can only use letters, numbers, and hyphens (min 2 characters).");
+    }
     const digits = form.contact_number.replace(/[^0-9]/g, "");
     if (digits.length < 7) return toast.error("Please enter a valid phone number.");
     if (form.pin.length < 6) return toast.error("Your PIN needs to be at least 6 digits.");
@@ -163,11 +158,21 @@ export default function Signup() {
               setSlugTouched(true);
               set("slug", slugify(e.target.value));
             }}
+            onPaste={(e) => {
+              e.preventDefault();
+              setSlugTouched(true);
+              set("slug", slugify(e.clipboardData.getData("text")));
+            }}
             placeholder="my-bistro"
+            autoComplete="off"
+            spellCheck={false}
+            inputMode="text"
+            pattern="[a-z0-9-]*"
+            title="Only lowercase letters, numbers, and hyphens"
             data-testid="signup-slug"
           />
           <span style={{ color: "var(--muted)", fontSize: 11, marginTop: 4, display: "block" }}>
-            Customers order at zentaapqr.com/r/{previewSlug}
+            Letters, numbers, and hyphens only — customers order at zentaapqr.com/r/{previewSlug}
           </span>
         </div>
 

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Printer, X, MessageCircle } from "lucide-react";
+import { toast } from "sonner";
 
 export default function BillModal({ order, settings, onClose }) {
   const [waPhone, setWaPhone] = useState("");
   const [showWa, setShowWa] = useState(false);
+  const printRef = useRef(null);
   if (!order) return null;
   const s = settings || {};
   const items = Array.isArray(order.items) ? order.items : [];
@@ -19,7 +21,63 @@ export default function BillModal({ order, settings, onClose }) {
     : "—";
 
   const handlePrint = () => {
-    window.print();
+    const el = printRef.current;
+    if (!el) {
+      window.print();
+      return;
+    }
+    const w = window.open("", "_blank", "noopener,noreferrer,width=420,height=720");
+    if (!w) {
+      toast.error("Please allow pop-ups to print or download the bill.");
+      return;
+    }
+    const title = `Bill ${billNo}`;
+    w.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${title}</title>
+  <style>
+    @page { size: 80mm auto; margin: 4mm; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #111;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    body { width: 72mm; max-width: 72mm; padding: 2mm; }
+    img { max-width: 80px; max-height: 80px; object-fit: contain; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: none; padding: 2px 0; font-size: 12px; color: #000; }
+    .b-center { text-align: center; }
+    .b-line { border-top: 1px dashed #000; margin: 8px 0; }
+    @media print {
+      html, body { width: 72mm; background: #fff; }
+    }
+  </style>
+</head>
+<body>${el.innerHTML}</body>
+</html>`);
+    w.document.close();
+    const doPrint = () => {
+      try {
+        w.focus();
+        w.print();
+      } finally {
+        setTimeout(() => {
+          try { w.close(); } catch { /* ignore */ }
+        }, 400);
+      }
+    };
+    if (w.document.readyState === "complete") {
+      setTimeout(doPrint, 250);
+    } else {
+      w.onload = () => setTimeout(doPrint, 250);
+    }
   };
 
   const buildWhatsAppMessage = () => {
@@ -54,7 +112,6 @@ export default function BillModal({ order, settings, onClose }) {
       return;
     }
     const msg = encodeURIComponent(buildWhatsAppMessage());
-    // For Indian numbers default to 91 prefix if missing country code
     const num = digits.length === 10 ? `91${digits}` : digits;
     window.open(`https://wa.me/${num}?text=${msg}`, "_blank");
   };
@@ -106,8 +163,8 @@ export default function BillModal({ order, settings, onClose }) {
           </button>
         </div>
 
-        {/* Printable area — must NOT sit under a .no-print ancestor or print is blank */}
         <div
+          ref={printRef}
           className="bill-print"
           style={{
             background: "white",
@@ -211,7 +268,7 @@ export default function BillModal({ order, settings, onClose }) {
             style={{ flex: 1, minWidth: 140 }}
           >
             <Printer size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-            Print Bill
+            Print / Download
           </button>
           <button
             onClick={() => setShowWa((v) => !v)}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 import uuid
 from typing import Optional
 
@@ -17,7 +18,13 @@ SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def normalize_slug(raw: str) -> str:
-    s = (raw or "").strip().lower()
+    """Only lowercase letters, digits, and hyphens. Apostrophes/special chars are removed."""
+    s = unicodedata.normalize("NFKD", raw or "")
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.strip().lower()
+    # Drop apostrophe-like characters entirely (BT's → bts, not bt-s)
+    s = re.sub(r"[''`´]", "", s)
+    # Any other non-alphanumeric → hyphen
     s = re.sub(r"[^a-z0-9]+", "-", s)
     s = re.sub(r"-+", "-", s).strip("-")
     return s
@@ -26,11 +33,14 @@ def normalize_slug(raw: str) -> str:
 def validate_slug(slug: str) -> str:
     slug = normalize_slug(slug)
     if len(slug) < 2 or len(slug) > 48:
-        raise HTTPException(status_code=400, detail="Choose a URL name between 2 and 48 characters.")
+        raise HTTPException(
+            status_code=400,
+            detail="Restaurant URL must be 2–48 characters using only letters, numbers, and hyphens.",
+        )
     if not SLUG_RE.match(slug):
         raise HTTPException(
             status_code=400,
-            detail="URL name can only use lowercase letters, numbers, and hyphens.",
+            detail="Restaurant URL can only use lowercase letters, numbers, and hyphens — no spaces or special characters.",
         )
     reserved = {"api", "login", "signup", "manager", "kitchen", "customer", "subscribe", "r", "www", "admin"}
     if slug in reserved:
@@ -79,7 +89,10 @@ async def require_restaurant_id(restaurant_id: str) -> dict:
 async def require_by_slug(slug: str) -> dict:
     doc = await get_by_slug(slug)
     if not doc:
-        raise HTTPException(status_code=404, detail="Restaurant not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="No restaurant found with that URL. Check Manager → Profile for your restaurant URL.",
+        )
     return doc
 
 

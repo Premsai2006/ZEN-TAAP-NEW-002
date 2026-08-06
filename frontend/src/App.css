@@ -677,20 +677,38 @@ tr:last-child td { border-bottom: none; }
   flex-shrink: 0;
 }
 
-/* Print bill — .bill-print must not live under a display:none .no-print ancestor */
+/* Print bill — thermal 80mm; prefer dedicated print window from BillModal */
 @media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    width: 80mm !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
   body * { visibility: hidden; }
   .bill-print, .bill-print * { visibility: visible; }
   .bill-print {
     position: absolute;
-    left: 0; top: 0;
-    width: 80mm;
-    padding: 8mm 6mm;
+    left: 0;
+    top: 0;
+    width: 72mm;
+    max-width: 72mm;
+    padding: 2mm;
+    margin: 0;
     color: #000 !important;
     background: #fff !important;
-    font-family: 'Courier New', monospace;
+    font-family: 'Courier New', Courier, monospace;
     font-size: 12px;
+    line-height: 1.35;
     z-index: 9999;
+    box-shadow: none !important;
+    border-radius: 0 !important;
   }
   .bill-print .b-center { text-align: center; }
   .bill-print .b-line { border-top: 1px dashed #000; margin: 6px 0; }
@@ -712,6 +730,7 @@ tr:last-child td { border-bottom: none; }
     max-width: none !important;
     max-height: none !important;
     overflow: visible !important;
+    border-radius: 0 !important;
   }
 }
 

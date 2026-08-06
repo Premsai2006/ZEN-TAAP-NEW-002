@@ -47,6 +47,7 @@ const RULES = [
   [/image too large/i, "That image is too large. Please use one under 1.8 MB."],
   [/invalid image/i, "That file isn't a valid image. Please try another."],
   [/tables must be between/i, "Please choose a table count within the allowed range."],
+  [/no restaurant found with that url|restaurant not found/i, "No restaurant found with that URL. Check Manager → Profile for the exact name (e.g. bt-s)."],
   [/not found/i, "We couldn't find that item. It may have been removed."],
   [/razorpay|sdk failed/i, "Payment couldn't start. Please refresh and try again."],
 ];
