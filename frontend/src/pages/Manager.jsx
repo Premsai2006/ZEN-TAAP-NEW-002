@@ -35,6 +35,9 @@ export default function Manager() {
   const [stats, setStats] = useState(null);
   const [settings, setSettings] = useState(null);
   const [subscription, setSubscription] = useState(null);
+  const [restaurantSlug, setRestaurantSlug] = useState(() => {
+    try { return localStorage.getItem("mgr_slug") || ""; } catch { return ""; }
+  });
   const [clock, setClock] = useState("");
   const navigate = useNavigate();
 
@@ -48,12 +51,17 @@ export default function Manager() {
     try {
       // On Settings/Profile, skip live orders/stats polling payload (issue #19)
       if (active === "settings" || active === "profile") {
-        const [st, sub] = await Promise.all([
+        const [st, sub, prof] = await Promise.all([
           api.get("/settings"),
           api.get("/subscription"),
+          api.get("/profile"),
         ]);
         setSettings(st.data);
         setSubscription(sub.data);
+        if (prof.data?.slug) {
+          setRestaurantSlug(prof.data.slug);
+          try { localStorage.setItem("mgr_slug", prof.data.slug); } catch { /* ignore */ }
+        }
         return;
       }
       const hasAccess = !subscription || ["trial", "active"].includes(subscription.status);
@@ -65,6 +73,7 @@ export default function Manager() {
         hasAccess ? api.get("/stats/today") : Promise.resolve({ data: null }),
         api.get("/settings"),
         api.get("/subscription"),
+        api.get("/profile"),
       ]);
       const val = (i) => (results[i].status === "fulfilled" ? results[i].value.data : undefined);
       if (val(0) !== undefined) setOrders(val(0));
@@ -74,6 +83,10 @@ export default function Manager() {
       else if (!hasAccess) setStats(null);
       if (val(4) !== undefined) setSettings(val(4));
       if (val(5) !== undefined) setSubscription(val(5));
+      if (val(6)?.slug) {
+        setRestaurantSlug(val(6).slug);
+        try { localStorage.setItem("mgr_slug", val(6).slug); } catch { /* ignore */ }
+      }
     } catch (err) {
       console.warn("Manager.refresh failed:", err?.response?.status, err?.message);
     }
@@ -253,7 +266,9 @@ export default function Manager() {
             locked={locked}
           />
         )}
-        {active === "tables" && <TablesSection orders={orders} subscription={subscription} />}
+        {active === "tables" && (
+          <TablesSection orders={orders} subscription={subscription} slug={restaurantSlug} />
+        )}
         {active === "menu" && (
           <MenuSection
             menu={menu}

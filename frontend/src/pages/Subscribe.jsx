@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Printer } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import { restaurantOrderUrl } from "@/lib/qr";
 import {
   GPayMark, PhonePeMark, PaytmMark, BHIMMark,
   VisaMark, MastercardMark, RuPayMark,
@@ -14,7 +15,6 @@ import {
 
 const MIN_T = 10;
 const MAX_T = 60;
-const QR_DOMAIN = "https://zentaapqr.com";
 const fmtRupee = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
   if (!iso) return "—";
@@ -457,7 +457,7 @@ export default function Subscribe() {
                 {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
                   <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
                     <QRCodeSVG
-                      value={`${QR_DOMAIN}/r/${localStorage.getItem("mgr_slug") || "restaurant"}?table=${n}`}
+                      value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
                       size={84}
                       bgColor="#ffffff"
                       fgColor="#161310"
@@ -479,7 +479,7 @@ export default function Subscribe() {
                 {Array.from({ length: tables }, (_, i) => i + 1).map((n) => (
                   <div key={`hide-${n}`} data-qr-svg-sub={n}>
                     <QRCodeSVG
-                      value={`${QR_DOMAIN}/r/${localStorage.getItem("mgr_slug") || "restaurant"}?table=${n}`}
+                      value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
                       size={160}
                       bgColor="#ffffff"
                       fgColor="#161310"

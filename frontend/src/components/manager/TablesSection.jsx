@@ -1,18 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Printer, QrCode } from "lucide-react";
+import { Download, Printer, QrCode, Link2 } from "lucide-react";
 import { toast } from "sonner";
+import { restaurantOrderUrl } from "@/lib/qr";
 
-const QR_DOMAIN = "https://zentaapqr.com";
-
-function restaurantOrderUrl(slug, tableN) {
-  const s = slug || localStorage.getItem("mgr_slug") || "";
-  if (!s) return `${QR_DOMAIN}/login`;
-  return `${QR_DOMAIN}/r/${s}?table=${tableN}`;
-}
-
-export default function TablesSection({ orders, subscription }) {
-  const slug = localStorage.getItem("mgr_slug") || "";
+export default function TablesSection({ orders, subscription, slug: slugProp }) {
+  const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
   const tableCount = useMemo(() => {
     // Total tables come from the active subscription; fall back to 15 for unsubscribed/explore mode.
     const t = subscription?.tables;
@@ -22,7 +15,7 @@ export default function TablesSection({ orders, subscription }) {
 
   const tableMap = {};
   for (const o of orders || []) {
-    if (["new", "cooking", "done"].includes(o.status)) {
+    if (["new", "cooking", "done"].includes(o.status) && o.table > 0) {
       tableMap[o.table] = (tableMap[o.table] || 0) + o.amount;
     }
   }
@@ -44,7 +37,20 @@ export default function TablesSection({ orders, subscription }) {
     toast.success(`Downloaded QR for Table ${n}`);
   };
 
+  const copyLink = async (n) => {
+    const url = restaurantOrderUrl(slug, n);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(`Table ${n} link copied`);
+    } catch {
+      toast.message(url);
+    }
+  };
+
   const printAllQRs = () => {
+    if (!slug) {
+      return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
+    }
     const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
     if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
     const cards = Array.from({ length: tableCount }, (_, i) => i + 1)
@@ -56,7 +62,8 @@ export default function TablesSection({ orders, subscription }) {
             (document.querySelector(`[data-qr-svg="${n}"] svg`)?.outerHTML) || ""
           }</div>
           <div class="t">Table ${n}</div>
-          <div class="d">Scan to order · zentaapqr.com</div>
+          <div class="d">Scan to order · Table ${n}</div>
+          <div class="u">${restaurantOrderUrl(slug, n)}</div>
         </div>`
       )
       .join("");
@@ -69,6 +76,7 @@ export default function TablesSection({ orders, subscription }) {
         .qrwrap svg { width: 160px; height: 160px; }
         .t { font-size: 18px; font-weight: 700; margin-top: 10px; }
         .d { font-size: 11px; color: #666; margin-top: 4px; }
+        .u { font-size: 9px; color: #999; margin-top: 6px; word-break: break-all; }
         @media print { body { background: white; } .grid { gap: 12px; } }
       </style>
     </head><body><div class="grid">${cards}</div>
@@ -82,6 +90,15 @@ export default function TablesSection({ orders, subscription }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
         <div style={{ fontSize: 13, color: "var(--muted)" }} data-testid="tables-summary">
           {tableCount} tables {subscription?.tables ? `· from your subscription` : "· default (no active subscription)"}
+          {slug ? (
+            <span style={{ marginLeft: 8 }} data-testid="tables-slug-hint">
+              · QR → <code style={{ color: "var(--gold)" }}>/r/{slug}?table=N</code>
+            </span>
+          ) : (
+            <span style={{ marginLeft: 8, color: "var(--red)" }} data-testid="tables-slug-missing">
+              · Set restaurant URL in Profile to enable table QRs
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
@@ -128,33 +145,69 @@ export default function TablesSection({ orders, subscription }) {
         <div ref={qrPrintRef} style={{ marginTop: 24 }} data-testid="tables-qr-grid">
           <div className="font-serif" style={{ fontSize: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <QrCode size={16} color="var(--gold)" />
-            Table QR Codes — print, laminate &amp; place on each table
+            Table QR Codes — each QR opens the menu locked to that table
           </div>
+          {!slug && (
+            <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 14 }} data-testid="qr-slug-warning">
+              Restaurant URL is missing. Go to Profile and set it, then come back to generate linked QRs.
+            </div>
+          )}
           <div className="tables-qr-grid">
-            {Array.from({ length: tableCount }, (_, i) => i + 1).map((n) => (
-              <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
-                <div data-qr-svg={n} style={{ background: "white", padding: 8, borderRadius: 8 }}>
-                  <QRCodeSVG
-                    value={restaurantOrderUrl(slug, n)}
-                    size={120}
-                    bgColor="#ffffff"
-                    fgColor="#161310"
-                    level="M"
-                  />
+            {Array.from({ length: tableCount }, (_, i) => i + 1).map((n) => {
+              const url = restaurantOrderUrl(slug, n);
+              return (
+                <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
+                  <div data-qr-svg={n} style={{ background: "white", padding: 8, borderRadius: 8 }}>
+                    <QRCodeSVG
+                      value={url}
+                      size={120}
+                      bgColor="#ffffff"
+                      fgColor="#161310"
+                      level="M"
+                    />
+                  </div>
+                  <div style={{ marginTop: 8, fontWeight: 700 }}>Table {n}</div>
+                  <div
+                    data-testid={`table-qr-url-${n}`}
+                    title={url}
+                    style={{
+                      marginTop: 4,
+                      fontSize: 10,
+                      color: "var(--muted)",
+                      wordBreak: "break-all",
+                      lineHeight: 1.3,
+                      maxWidth: 160,
+                    }}
+                  >
+                    {slug ? `?table=${n}` : "no slug"}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => downloadOneQR(n)}
+                      className="mini-btn"
+                      data-testid={`download-qr-${n}`}
+                      style={{ fontSize: 11 }}
+                      disabled={!slug}
+                    >
+                      <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+                      Download
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyLink(n)}
+                      className="mini-btn"
+                      data-testid={`copy-qr-link-${n}`}
+                      style={{ fontSize: 11 }}
+                      disabled={!slug}
+                    >
+                      <Link2 size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+                      Copy link
+                    </button>
+                  </div>
                 </div>
-                <div style={{ marginTop: 8, fontWeight: 700 }}>Table {n}</div>
-                <button
-                  type="button"
-                  onClick={() => downloadOneQR(n)}
-                  className="mini-btn"
-                  data-testid={`download-qr-${n}`}
-                  style={{ marginTop: 8, fontSize: 11 }}
-                >
-                  <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                  Download
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

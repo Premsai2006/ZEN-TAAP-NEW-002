@@ -1,0 +1,59 @@
+---
+description: Deploy ZenTaap to Hostinger VPS when user says deploy
+alwaysApply: true
+---
+
+# ZenTaap deploy (Hostinger VPS)
+
+When the user says **deploy**, do this over SSH. Do not invent other hosts/paths.
+
+## SSH
+
+- Host alias: `zentaap` (from `~/.ssh/config`)
+- Server: `187.127.186.183`
+- User: `zentaap-dev`
+- App path: `/var/www/ZEN-TAAP-NEW-002`
+- Branch: `main` on GitHub `Premsai2006/ZEN-TAAP-NEW-002`
+- Frontend build: nginx serves `frontend/build`
+- Backend: supervisor program `zentaap` → `uvicorn server:app` on `127.0.0.1:8000`
+
+**Never** commit or print `.env` secrets. **Never** overwrite remote `.env`.
+
+## Normal workflow
+
+1. Commit and push code to `origin/main` (only when the user asked to commit/push/deploy)
+2. Run the deploy SSH command below with full/network permissions
+3. Verify API status + supervisor status from the command output
+4. Smoke-test production if a public URL is known
+
+## Deploy command
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=20 zentaap 'set -e
+cd /var/www/ZEN-TAAP-NEW-002
+git stash push -u -m "pre-deploy $(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git log -1 --oneline
+cd backend
+source venv/bin/activate
+pip install -q -r requirements.txt
+deactivate
+sudo supervisorctl restart zentaap
+cd ../frontend
+yarn install --ignore-engines
+CI=false yarn build
+sleep 2
+curl -s http://127.0.0.1:8000/api/auth/status
+sudo supervisorctl status zentaap
+'
+```
+
+## After deploy
+
+Confirm:
+
+- `git log -1` matches the pushed commit
+- `curl .../api/auth/status` returns JSON (not an error page)
+- `supervisorctl status zentaap` is `RUNNING`
