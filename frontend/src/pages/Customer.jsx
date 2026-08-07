@@ -371,12 +371,6 @@ export default function Customer() {
           onDone={() => setSuccessInfo(null)}
         />
       )}
-
-      <div style={{ textAlign: "center", marginTop: 30, fontSize: 12, color: "var(--muted)" }}>
-        <a href="/login" style={{ color: "var(--gold)", textDecoration: "none" }} data-testid="back-to-login">
-          ← Manager sign-in
-        </a>
-      </div>
     </div>
   );
 }
