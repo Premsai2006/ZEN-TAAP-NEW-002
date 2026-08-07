@@ -6,6 +6,7 @@ import { restaurantOrderUrl } from "@/lib/qr";
 import {
   buildLabeledQrPng,
   downloadAllQrsZip,
+  printAllLabeledQrs,
   qrFileName,
   triggerBlobDownload,
 } from "@/lib/qrDownload";
@@ -28,6 +29,7 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
 
   const [showQRs, setShowQRs] = useState(false);
   const [zipping, setZipping] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const qrPrintRef = useRef(null);
 
   const tableNums = useMemo(
@@ -80,52 +82,42 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
     }
   };
 
-  const printAllQRs = () => {
+  const printAllQRs = async () => {
     if (!slug) {
       return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
     }
-    const w = window.open("", "_blank", "width=900,height=700");
-    if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
-    const cards = tableNums
-      .map(
-        (n) => `
-        <div class="qrcard">
-          <div class="brand">ZenTaap</div>
-          ${restaurantName ? `<div class="rest">${restaurantName}</div>` : ""}
-          <div class="qrwrap">${
-            (document.querySelector(`[data-qr-svg="${n}"] svg`)?.outerHTML) || ""
-          }</div>
-          <div class="t">TABLE ${n}</div>
-          <div class="d">Scan to order · Table ${n}</div>
-          <div class="u">${restaurantOrderUrl(slug, n)}</div>
-        </div>`
-      )
-      .join("");
-    w.document.write(`<!doctype html><html><head><title>ZenTaap QR Codes</title>
-      <style>
-        body { font-family: -apple-system, sans-serif; padding: 24px; background: #f4f4f4; }
-        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .qrcard { background: white; border: 2px solid #e87d2f; border-radius: 14px; padding: 18px; text-align: center; break-inside: avoid; }
-        .brand { font-family: serif; font-size: 22px; color: #e87d2f; margin-bottom: 4px; }
-        .rest { font-size: 12px; color: #666; margin-bottom: 8px; }
-        .qrwrap svg { width: 160px; height: 160px; }
-        .t { font-size: 22px; font-weight: 800; margin-top: 10px; letter-spacing: 0.5px; }
-        .d { font-size: 11px; color: #666; margin-top: 4px; }
-        .u { font-size: 9px; color: #999; margin-top: 6px; word-break: break-all; }
-        @media print { body { background: white; } .grid { gap: 12px; } }
-      </style>
-    </head><body><div class="grid">${cards}</div>
-    <script>setTimeout(() => window.print(), 400);</script>
-    </body></html>`);
-    w.document.close();
+    const items = tableNums
+      .map((n) => ({ tableNum: n, svgEl: getQrSvg(n) }))
+      .filter((x) => x.svgEl);
+    if (items.length === 0) {
+      return toast.error("QR codes aren't ready yet. Please wait a moment and try again.");
+    }
+    setPrinting(true);
+    try {
+      await printAllLabeledQrs(items, { restaurantName });
+    } catch {
+      toast.error("Couldn't open the print dialog. Please try again.");
+    } finally {
+      setPrinting(false);
+    }
   };
 
   return (
     <div className="section active" data-testid="tables-section">
-      {/* Always render QRs off-screen so Print / Download-all work without Show first */}
+      {/* Off-screen but fully sized so QR SVGs actually paint for print/download */}
       <div
         aria-hidden="true"
-        style={{ position: "absolute", left: -9999, top: 0, width: 1, height: 1, overflow: "hidden" }}
+        style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          opacity: 0,
+          pointerEvents: "none",
+          zIndex: -1,
+          width: 220,
+          height: 220 * tableCount,
+          overflow: "hidden",
+        }}
       >
         {tableNums.map((n) => (
           <div key={`hidden-qr-${n}`} data-qr-svg={n}>
@@ -180,10 +172,11 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
             onClick={printAllQRs}
             className="mini-btn"
             data-testid="print-qr-btn"
+            disabled={printing || !slug}
             style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
           >
             <Printer size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-            Print all QRs
+            {printing ? "Preparing…" : "Print all QRs"}
           </button>
         </div>
       </div>

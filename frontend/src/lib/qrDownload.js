@@ -18,7 +18,13 @@ function padTable(n) {
  * @returns {Promise<Blob>} PNG blob
  */
 export async function buildLabeledQrPng(svgEl, tableNum, { restaurantName } = {}) {
-  const svgMarkup = new XMLSerializer().serializeToString(svgEl);
+  let svgMarkup = new XMLSerializer().serializeToString(svgEl);
+  if (!/xmlns=/.test(svgMarkup)) {
+    svgMarkup = svgMarkup.replace(
+      /<svg\b/,
+      '<svg xmlns="http://www.w3.org/2000/svg"'
+    );
+  }
   const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
   const svgUrl = URL.createObjectURL(svgBlob);
   try {
@@ -128,4 +134,97 @@ export async function downloadAllQrsZip(items, { slug, restaurantName } = {}) {
   const name = slug ? `zentaap-${slug}-all-table-qrs.zip` : "zentaap-all-table-qrs.zip";
   triggerBlobDownload(zipBlob, name);
   return items.length;
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read QR image"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Print all labeled QR cards via a hidden iframe (no popup / blank page).
+ * `items` = [{ tableNum, svgEl }, ...]
+ */
+export async function printAllLabeledQrs(items, { restaurantName } = {}) {
+  const cards = [];
+  for (const { tableNum, svgEl } of items) {
+    if (!svgEl) continue;
+    const png = await buildLabeledQrPng(svgEl, tableNum, { restaurantName });
+    const dataUrl = await blobToDataUrl(png);
+    cards.push(
+      `<div class="qrcard"><img src="${dataUrl}" alt="Table ${tableNum}" /></div>`
+    );
+  }
+  if (cards.length === 0) throw new Error("No QR codes ready");
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("title", "Print table QRs");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(iframe);
+
+  const win = iframe.contentWindow;
+  const doc = win?.document;
+  if (!win || !doc) {
+    iframe.remove();
+    throw new Error("Print frame unavailable");
+  }
+
+  doc.open();
+  doc.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ZenTaap Table QR Codes</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; font-family: -apple-system, sans-serif; background: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .qrcard { break-inside: avoid; page-break-inside: avoid; text-align: center; }
+    .qrcard img { width: 100%; max-width: 340px; height: auto; }
+    @media print {
+      body { padding: 8px; }
+      .grid { gap: 12px; }
+      .qrcard img { max-width: 100%; }
+    }
+    @page { margin: 10mm; }
+  </style>
+</head>
+<body><div class="grid">${cards.join("")}</div></body>
+</html>`);
+  doc.close();
+
+  const imgs = Array.from(doc.images || []);
+  await Promise.all(
+    imgs.map((img) =>
+      img.complete
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+          })
+    )
+  );
+
+  const cleanup = () => {
+    try {
+      iframe.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  try {
+    win.focus();
+    win.print();
+  } finally {
+    if (typeof win.onafterprint !== "undefined") win.onafterprint = cleanup;
+    setTimeout(cleanup, 60_000);
+  }
+
+  return cards.length;
 }
