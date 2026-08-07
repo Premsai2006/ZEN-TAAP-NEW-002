@@ -3,8 +3,14 @@ import { QRCodeSVG } from "qrcode.react";
 import { Download, Printer, QrCode, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { restaurantOrderUrl } from "@/lib/qr";
+import {
+  buildLabeledQrPng,
+  downloadAllQrsZip,
+  qrFileName,
+  triggerBlobDownload,
+} from "@/lib/qrDownload";
 
-export default function TablesSection({ orders, subscription, slug: slugProp }) {
+export default function TablesSection({ orders, subscription, slug: slugProp, restaurantName }) {
   const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
   const tableCount = useMemo(() => {
     // Total tables come from the active subscription; fall back to 15 for unsubscribed/explore mode.
@@ -21,20 +27,47 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
   }
 
   const [showQRs, setShowQRs] = useState(false);
+  const [zipping, setZipping] = useState(false);
   const qrPrintRef = useRef(null);
 
-  const downloadOneQR = (n) => {
-    const el = document.querySelector(`[data-qr-svg="${n}"] svg`);
+  const tableNums = useMemo(
+    () => Array.from({ length: tableCount }, (_, i) => i + 1),
+    [tableCount]
+  );
+
+  const getQrSvg = (n) => document.querySelector(`[data-qr-svg="${n}"] svg`);
+
+  const downloadOneQR = async (n) => {
+    const el = getQrSvg(n);
     if (!el) return toast.error("QR code isn't ready yet. Please try again.");
-    const svg = new XMLSerializer().serializeToString(el);
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `zentaap-table-${n}.svg`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Downloaded QR for Table ${n}`);
+    try {
+      const png = await buildLabeledQrPng(el, n, { restaurantName });
+      triggerBlobDownload(png, qrFileName(n));
+      toast.success(`Downloaded Table ${n} QR`);
+    } catch {
+      toast.error("Couldn't download this QR. Please try again.");
+    }
+  };
+
+  const downloadAllQRs = async () => {
+    if (!slug) {
+      return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
+    }
+    const items = tableNums
+      .map((n) => ({ tableNum: n, svgEl: getQrSvg(n) }))
+      .filter((x) => x.svgEl);
+    if (items.length === 0) {
+      return toast.error("QR codes aren't ready yet. Tap Show QR codes, then try again.");
+    }
+    setZipping(true);
+    try {
+      await downloadAllQrsZip(items, { slug, restaurantName });
+      toast.success(`Downloaded ZIP with ${items.length} table QRs`);
+    } catch {
+      toast.error("Couldn't create the ZIP. Please try again.");
+    } finally {
+      setZipping(false);
+    }
   };
 
   const copyLink = async (n) => {
@@ -51,17 +84,18 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
     if (!slug) {
       return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
     }
-    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+    const w = window.open("", "_blank", "width=900,height=700");
     if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
-    const cards = Array.from({ length: tableCount }, (_, i) => i + 1)
+    const cards = tableNums
       .map(
         (n) => `
         <div class="qrcard">
           <div class="brand">ZenTaap</div>
+          ${restaurantName ? `<div class="rest">${restaurantName}</div>` : ""}
           <div class="qrwrap">${
             (document.querySelector(`[data-qr-svg="${n}"] svg`)?.outerHTML) || ""
           }</div>
-          <div class="t">Table ${n}</div>
+          <div class="t">TABLE ${n}</div>
           <div class="d">Scan to order · Table ${n}</div>
           <div class="u">${restaurantOrderUrl(slug, n)}</div>
         </div>`
@@ -72,9 +106,10 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
         body { font-family: -apple-system, sans-serif; padding: 24px; background: #f4f4f4; }
         .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
         .qrcard { background: white; border: 2px solid #e87d2f; border-radius: 14px; padding: 18px; text-align: center; break-inside: avoid; }
-        .brand { font-family: serif; font-size: 22px; color: #e87d2f; margin-bottom: 10px; }
+        .brand { font-family: serif; font-size: 22px; color: #e87d2f; margin-bottom: 4px; }
+        .rest { font-size: 12px; color: #666; margin-bottom: 8px; }
         .qrwrap svg { width: 160px; height: 160px; }
-        .t { font-size: 18px; font-weight: 700; margin-top: 10px; }
+        .t { font-size: 22px; font-weight: 800; margin-top: 10px; letter-spacing: 0.5px; }
         .d { font-size: 11px; color: #666; margin-top: 4px; }
         .u { font-size: 9px; color: #999; margin-top: 6px; word-break: break-all; }
         @media print { body { background: white; } .grid { gap: 12px; } }
@@ -87,6 +122,24 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
 
   return (
     <div className="section active" data-testid="tables-section">
+      {/* Always render QRs off-screen so Print / Download-all work without Show first */}
+      <div
+        aria-hidden="true"
+        style={{ position: "absolute", left: -9999, top: 0, width: 1, height: 1, overflow: "hidden" }}
+      >
+        {tableNums.map((n) => (
+          <div key={`hidden-qr-${n}`} data-qr-svg={n}>
+            <QRCodeSVG
+              value={restaurantOrderUrl(slug, n)}
+              size={200}
+              bgColor="#ffffff"
+              fgColor="#161310"
+              level="M"
+            />
+          </div>
+        ))}
+      </div>
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
         <div style={{ fontSize: 13, color: "var(--muted)" }} data-testid="tables-summary">
           {tableCount} tables {subscription?.tables ? `· from your subscription` : "· default (no active subscription)"}
@@ -100,7 +153,7 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
             </span>
           )}
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
             onClick={() => setShowQRs((v) => !v)}
@@ -110,6 +163,17 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
           >
             <QrCode size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
             {showQRs ? "Hide QR codes" : "Show QR codes"}
+          </button>
+          <button
+            type="button"
+            onClick={downloadAllQRs}
+            className="mini-btn"
+            data-testid="download-all-qr-btn"
+            disabled={zipping || !slug}
+            style={{ borderColor: "var(--gold)", color: "var(--gold)" }}
+          >
+            <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+            {zipping ? "Preparing ZIP…" : "Download all QRs"}
           </button>
           <button
             type="button"
@@ -125,7 +189,7 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
       </div>
 
       <div className="tables-grid">
-        {Array.from({ length: tableCount }, (_, i) => i + 1).map((n) => {
+        {tableNums.map((n) => {
           const occupied = !!tableMap[n];
           return (
             <div
@@ -153,11 +217,11 @@ export default function TablesSection({ orders, subscription, slug: slugProp }) 
             </div>
           )}
           <div className="tables-qr-grid">
-            {Array.from({ length: tableCount }, (_, i) => i + 1).map((n) => {
+            {tableNums.map((n) => {
               const url = restaurantOrderUrl(slug, n);
               return (
                 <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
-                  <div data-qr-svg={n} style={{ background: "white", padding: 8, borderRadius: 8 }}>
+                  <div style={{ background: "white", padding: 8, borderRadius: 8 }}>
                     <QRCodeSVG
                       value={url}
                       size={120}

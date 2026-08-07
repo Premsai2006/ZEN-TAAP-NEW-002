@@ -267,7 +267,12 @@ export default function Manager() {
           />
         )}
         {active === "tables" && (
-          <TablesSection orders={orders} subscription={subscription} slug={restaurantSlug} />
+          <TablesSection
+            orders={orders}
+            subscription={subscription}
+            slug={restaurantSlug}
+            restaurantName={settings?.restaurant_name}
+          />
         )}
         {active === "menu" && (
           <MenuSection
