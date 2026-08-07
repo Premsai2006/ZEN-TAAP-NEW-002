@@ -677,13 +677,9 @@ tr:last-child td { border-bottom: none; }
   flex-shrink: 0;
 }
 
-/* Print bill — thermal 80mm; prefer dedicated print window from BillModal */
+/* Print bill — only when a bill preview is on screen (don't blank QR/other prints) */
 @media print {
-  @page {
-    size: 80mm auto;
-    margin: 4mm;
-  }
-  html, body {
+  body:has(.bill-print) {
     margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
@@ -691,9 +687,10 @@ tr:last-child td { border-bottom: none; }
     min-height: 0 !important;
     height: auto !important;
   }
-  body * { visibility: hidden; }
-  .bill-print, .bill-print * { visibility: visible; }
-  .bill-print {
+  body:has(.bill-print) * { visibility: hidden; }
+  body:has(.bill-print) .bill-print,
+  body:has(.bill-print) .bill-print * { visibility: visible; }
+  body:has(.bill-print) .bill-print {
     position: absolute;
     left: 0;
     top: 0;
@@ -710,19 +707,20 @@ tr:last-child td { border-bottom: none; }
     box-shadow: none !important;
     border-radius: 0 !important;
   }
-  .bill-print .b-center { text-align: center; }
-  .bill-print .b-line { border-top: 1px dashed #000; margin: 6px 0; }
-  .bill-print table { width: 100%; }
-  .bill-print th, .bill-print td { border: none; padding: 2px 0; font-size: 12px; color: #000 !important; }
-  .no-print { display: none !important; }
-  .bill-modal-overlay {
+  body:has(.bill-print) .bill-print .b-center { text-align: center; }
+  body:has(.bill-print) .bill-print .b-line { border-top: 1px dashed #000; margin: 6px 0; }
+  body:has(.bill-print) .bill-print table { width: 100%; }
+  body:has(.bill-print) .bill-print th,
+  body:has(.bill-print) .bill-print td { border: none; padding: 2px 0; font-size: 12px; color: #000 !important; }
+  body:has(.bill-print) .no-print { display: none !important; }
+  body:has(.bill-print) .bill-modal-overlay {
     position: static !important;
     inset: auto !important;
     background: transparent !important;
     display: block !important;
     padding: 0 !important;
   }
-  .bill-modal-card {
+  body:has(.bill-print) .bill-modal-card {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;

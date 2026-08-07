@@ -95,8 +95,13 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
     setPrinting(true);
     try {
       await printAllLabeledQrs(items, { restaurantName });
-    } catch {
-      toast.error("Couldn't open the print dialog. Please try again.");
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (/popup/i.test(msg)) {
+        toast.error("Please allow pop-ups to print your QR codes.");
+      } else {
+        toast.error("Couldn't open the print dialog. Please try again.");
+      }
     } finally {
       setPrinting(false);
     }
