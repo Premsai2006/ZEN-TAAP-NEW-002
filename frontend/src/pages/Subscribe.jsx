@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Printer } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
+import { downloadAllQrsZip } from "@/lib/qrDownload";
 import {
   GPayMark, PhonePeMark, PaytmMark, BHIMMark,
   VisaMark, MastercardMark, RuPayMark,
@@ -60,6 +61,7 @@ export default function Subscribe() {
   const [method, setMethod] = useState("upi");
   const [paying, setPaying] = useState(false);
   const [existing, setExisting] = useState(null);
+  const [zippingQrs, setZippingQrs] = useState(false);
 
   useEffect(() => {
     api
@@ -131,40 +133,29 @@ export default function Subscribe() {
       document.body.appendChild(s);
     });
 
-  const printSubscribeQRs = () => {
-    // Render all N QR codes off-screen into a hidden iframe-like print window.
-    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-    if (!w) return toast.error("Please allow pop-ups to print your QR codes.");
-    // Build SVG markup for each table using QRCodeSVG renderer.
-    // We render N tiles into the live DOM (off-screen) and serialize them.
-    const cards = Array.from({ length: tables }, (_, i) => i + 1)
-      .map((n) => {
-        const svg = document.querySelector(`[data-qr-svg-sub="${n}"] svg`);
-        const svgMarkup = svg ? svg.outerHTML : "";
-        return `
-          <div class="qrcard">
-            <div class="brand">ZenTaap</div>
-            <div class="qrwrap">${svgMarkup}</div>
-            <div class="t">Table ${n}</div>
-            <div class="d">Scan to order</div>
-          </div>`;
-      })
-      .join("");
-    w.document.write(`<!doctype html><html><head><title>ZenTaap QR Codes</title>
-      <style>
-        body { font-family: -apple-system, sans-serif; padding: 24px; background: #f4f4f4; }
-        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .qrcard { background: white; border: 2px solid #e87d2f; border-radius: 14px; padding: 18px; text-align: center; break-inside: avoid; }
-        .brand { font-family: serif; font-size: 22px; color: #e87d2f; margin-bottom: 10px; }
-        .qrwrap svg { width: 160px; height: 160px; }
-        .t { font-size: 18px; font-weight: 700; margin-top: 10px; }
-        .d { font-size: 11px; color: #666; margin-top: 4px; }
-        @media print { body { background: white; } .grid { gap: 12px; } }
-      </style>
-    </head><body><div class="grid">${cards}</div>
-    <script>setTimeout(() => window.print(), 400);</script>
-    </body></html>`);
-    w.document.close();
+  const downloadSubscribeQRs = async () => {
+    const slug = (localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
+    if (!slug) {
+      return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
+    }
+    const items = Array.from({ length: tables }, (_, i) => i + 1)
+      .map((n) => ({
+        tableNum: n,
+        svgEl: document.querySelector(`[data-qr-svg-sub="${n}"] svg`),
+      }))
+      .filter((x) => x.svgEl);
+    if (items.length === 0) {
+      return toast.error("QR codes aren't ready yet. Please wait a moment and try again.");
+    }
+    setZippingQrs(true);
+    try {
+      await downloadAllQrsZip(items, { slug });
+      toast.success(`Downloaded ZIP with ${items.length} table QRs`);
+    } catch {
+      toast.error("Couldn't create the ZIP. Please try again.");
+    } finally {
+      setZippingQrs(false);
+    }
   };
 
   const onSubscribe = async () => {
@@ -447,19 +438,20 @@ export default function Subscribe() {
                   <div>
                     <div className="font-serif" style={{ fontSize: 18 }}>Your {tables} QR codes</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      One QR per table. Print, laminate &amp; place on each table.
+                      One QR per table. Download, laminate &amp; place on each table.
                     </div>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={printSubscribeQRs}
+                  onClick={downloadSubscribeQRs}
                   className="mini-btn"
-                  data-testid="subscribe-print-qr-btn"
+                  data-testid="subscribe-download-qr-btn"
+                  disabled={zippingQrs}
                   style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
                 >
-                  <Printer size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-                  Print QRs
+                  <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  {zippingQrs ? "Preparing ZIP…" : "Download QRs"}
                 </button>
               </div>
               <div className="qr-grid" data-testid="qr-grid">
@@ -483,8 +475,21 @@ export default function Subscribe() {
                   </div>
                 )}
               </div>
-              {/* Hidden full-set so the Print button can read every QR even when only 12 are shown. */}
-              <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 1, height: 1, overflow: "hidden" }}>
+              {/* Hidden full-set so Download can read every QR even when only 12 are shown. */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "fixed",
+                  left: 0,
+                  top: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                  zIndex: -1,
+                  width: 180,
+                  height: 180 * tables,
+                  overflow: "hidden",
+                }}
+              >
                 {Array.from({ length: tables }, (_, i) => i + 1).map((n) => (
                   <div key={`hide-${n}`} data-qr-svg-sub={n}>
                     <QRCodeSVG

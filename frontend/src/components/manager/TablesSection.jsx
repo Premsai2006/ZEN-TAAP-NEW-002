@@ -1,12 +1,11 @@
 import { useMemo, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Printer, QrCode, Link2 } from "lucide-react";
+import { Download, QrCode, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { restaurantOrderUrl } from "@/lib/qr";
 import {
   buildLabeledQrPng,
   downloadAllQrsZip,
-  printAllLabeledQrs,
   qrFileName,
   triggerBlobDownload,
 } from "@/lib/qrDownload";
@@ -29,7 +28,6 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
 
   const [showQRs, setShowQRs] = useState(false);
   const [zipping, setZipping] = useState(false);
-  const [printing, setPrinting] = useState(false);
   const qrPrintRef = useRef(null);
 
   const tableNums = useMemo(
@@ -82,34 +80,9 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
     }
   };
 
-  const printAllQRs = async () => {
-    if (!slug) {
-      return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
-    }
-    const items = tableNums
-      .map((n) => ({ tableNum: n, svgEl: getQrSvg(n) }))
-      .filter((x) => x.svgEl);
-    if (items.length === 0) {
-      return toast.error("QR codes aren't ready yet. Please wait a moment and try again.");
-    }
-    setPrinting(true);
-    try {
-      await printAllLabeledQrs(items, { restaurantName });
-    } catch (err) {
-      const msg = String(err?.message || "");
-      if (/popup/i.test(msg)) {
-        toast.error("Please allow pop-ups to print your QR codes.");
-      } else {
-        toast.error("Couldn't open the print dialog. Please try again.");
-      }
-    } finally {
-      setPrinting(false);
-    }
-  };
-
   return (
     <div className="section active" data-testid="tables-section">
-      {/* Off-screen but fully sized so QR SVGs actually paint for print/download */}
+      {/* Off-screen but fully sized so QR SVGs paint for download */}
       <div
         aria-hidden="true"
         style={{
@@ -171,17 +144,6 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
           >
             <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
             {zipping ? "Preparing ZIP…" : "Download all QRs"}
-          </button>
-          <button
-            type="button"
-            onClick={printAllQRs}
-            className="mini-btn"
-            data-testid="print-qr-btn"
-            disabled={printing || !slug}
-            style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
-          >
-            <Printer size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-            {printing ? "Preparing…" : "Print all QRs"}
           </button>
         </div>
       </div>
