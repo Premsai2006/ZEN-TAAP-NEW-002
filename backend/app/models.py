@@ -127,12 +127,17 @@ class Order(BaseModel):
     items: List[OrderItem]
     amount: float
     status: str = "new"
+    notes: Optional[str] = None
+    payment_mode: Optional[str] = None
+    paid_at: Optional[str] = None
+    cancelled_at: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 class OrderCreate(BaseModel):
     table: int
     items: List[OrderItem]
+    notes: Optional[str] = None
 
 
 class OrderUpdate(BaseModel):

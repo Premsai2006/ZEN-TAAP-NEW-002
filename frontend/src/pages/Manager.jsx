@@ -264,6 +264,7 @@ export default function Manager() {
             setShowRevenue={setShowRevenuePersist}
             onRefresh={refresh}
             locked={locked}
+            menu={menu}
           />
         )}
         {active === "tables" && (

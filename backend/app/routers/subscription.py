@@ -5,23 +5,15 @@ from app.models import SubscribeBody
 from app.services.pricing import compute_price
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
+from app.services.subscription_access import (
+    parse_dt,
+    advance_cycle_to_future,
+    refresh_subscription_status,
+    has_access_status,
+    BILLING_CYCLE_DAYS,
+)
 
 router = APIRouter(tags=["subscription"])
-
-
-def _parse_dt(iso: str):
-    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
-
-
-def _advance_cycle_to_future(next_cycle_iso: str, now: datetime) -> str:
-    """Roll next_cycle forward in 30-day steps until it is in the future."""
-    try:
-        next_dt = _parse_dt(next_cycle_iso)
-    except Exception:
-        return (now + timedelta(days=30)).isoformat()
-    while next_dt <= now:
-        next_dt = next_dt + timedelta(days=30)
-    return next_dt.isoformat()
 
 
 @router.get("/pricing")
@@ -31,77 +23,46 @@ async def pricing(tables: int = 14):
 
 @router.get("/subscription")
 async def get_subscription(sess=Depends(require_manager)):
-    doc = await rest_svc.require_restaurant_id(sess["restaurant_id"])
+    rid = sess["restaurant_id"]
+    doc, status = await refresh_subscription_status(rid)
     cycle_start = doc.get("cycle_start")
     next_cycle = doc.get("next_cycle_start")
     now = datetime.now(timezone.utc)
-    status = doc.get("subscription_status", "none")
 
-    # Auto-expire when cycle ended without renewal payment
-    if next_cycle and status in ("active", "trial"):
-        try:
-            next_dt = _parse_dt(next_cycle)
-            last_paid = doc.get("last_payment_at")
-            last_paid_dt = None
-            if last_paid:
-                try:
-                    last_paid_dt = _parse_dt(last_paid)
-                except Exception:
-                    last_paid_dt = None
-            if now >= next_dt and (last_paid_dt is None or last_paid_dt < (next_dt - timedelta(days=1))):
-                status = "expired"
-                await rest_svc.update_restaurant(sess["restaurant_id"], {"subscription_status": "expired"})
-            elif now >= next_dt and last_paid_dt and last_paid_dt >= (next_dt - timedelta(days=1)):
-                # Paid recently — roll cycle forward and apply pending table change
-                new_next = _advance_cycle_to_future(next_cycle, now)
-                updates = {"next_cycle_start": new_next, "cycle_start": next_dt.isoformat()}
-                if doc.get("pending_tables"):
-                    price = compute_price(int(doc["pending_tables"]))
-                    updates.update({
-                        "subscription_tables": doc["pending_tables"],
-                        "subscription_subtotal": price["subtotal"],
-                        "subscription_gst": price["gst_amount"],
-                        "subscription_total": price["total_with_tax"],
-                        "pending_tables": None,
-                        "pending_subtotal": None,
-                        "pending_total": None,
-                    })
-                    doc["subscription_tables"] = doc["pending_tables"]
-                    doc["subscription_total"] = price["total_with_tax"]
-                    doc["pending_tables"] = None
-                next_cycle = new_next
-                await rest_svc.update_restaurant(sess["restaurant_id"], updates)
-        except Exception:
+    # Apply pending tables when a paid cycle rolls (after verify extended next_cycle)
+    if status == "active" and doc.get("pending_tables"):
+        next_dt = parse_dt(next_cycle)
+        last_paid = parse_dt(doc.get("last_payment_at"))
+        if next_dt and last_paid and last_paid >= (next_dt - timedelta(days=1)):
+            # recently paid into this cycle — pending already cleared on verify usually
             pass
 
-    # Never advertise a past next_cycle_start as the effective date for active subs
+    # Never advertise a past next_cycle_start for active subs display
     effective_from = next_cycle
     if next_cycle and status in ("active", "trial"):
         try:
-            if _parse_dt(next_cycle) < now:
-                effective_from = now.isoformat()
-                next_cycle = _advance_cycle_to_future(next_cycle, now)
-                await rest_svc.update_restaurant(sess["restaurant_id"], {"next_cycle_start": next_cycle})
+            if parse_dt(next_cycle) and parse_dt(next_cycle) < now and status == "active":
+                # still in grace — show current next_cycle
                 effective_from = next_cycle
         except Exception:
             pass
 
     cycle_end = None
     if next_cycle:
-        try:
-            d = _parse_dt(next_cycle) - timedelta(days=1)
-            cycle_end = d.isoformat()
-        except Exception:
+        d = parse_dt(next_cycle)
+        if d:
+            cycle_end = (d - timedelta(days=1)).isoformat()
+        else:
             cycle_end = next_cycle
 
-    has_access = status in ("trial", "active")
     return {
         "tables": doc.get("subscription_tables"),
         "subtotal": doc.get("subscription_subtotal"),
         "gst": doc.get("subscription_gst"),
         "total": doc.get("subscription_total"),
         "status": status,
-        "has_access": has_access,
+        "has_access": has_access_status(status),
+        "payment_status": doc.get("payment_status"),
         "trial_start": doc.get("trial_start"),
         "trial_end": doc.get("trial_end"),
         "payment_method": doc.get("payment_method"),
@@ -113,105 +74,121 @@ async def get_subscription(sess=Depends(require_manager)):
         "effective_from": effective_from,
         "cycle_end": cycle_end,
         "autopay_enabled": bool(doc.get("autopay_enabled", False)),
+        "autopay_ready": bool(doc.get("autopay_ready", False)),
+        "autopay_supported": False,
         "razorpay_customer_id": doc.get("razorpay_customer_id"),
         "razorpay_subscription_id": doc.get("razorpay_subscription_id"),
         "last_payment_id": doc.get("last_payment_id"),
         "last_payment_at": doc.get("last_payment_at"),
+        "needs_payment": status in ("expired", "none") or doc.get("payment_status") in ("failed", "grace"),
     }
 
 
 @router.post("/subscription")
 async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)):
+    """
+    Plan selection:
+    - none/skipped → start free trial (no payment, no last_payment_at)
+    - expired → stash plan intent; stays expired until /payments/verify
+    - active mid-cycle table change → pending until next cycle (no free upgrade)
+    """
     if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
         raise HTTPException(status_code=400, detail="Please choose a valid payment option.")
     price = compute_price(body.tables)
     now = datetime.now(timezone.utc)
-    existing = await rest_svc.require_restaurant_id(sess["restaurant_id"])
-    current_status = existing.get("subscription_status", "none")
+    existing, current_status = await refresh_subscription_status(sess["restaurant_id"])
     current_tables = existing.get("subscription_tables")
 
-    if current_status in ("none", "skipped", "expired") or not current_tables:
+    # --- First-time / skipped: start trial only (no payment yet) ---
+    if current_status in ("none", "skipped"):
         trial_end = now + timedelta(days=TRIAL_DAYS)
-        # New signups get a trial; expired renewals go straight to active after payment
-        status = "trial" if current_status in ("none", "skipped") else "active"
-        cycle_start = now
-        next_cycle = cycle_start + timedelta(days=30)
         update = {
             "subscription_tables": body.tables,
             "subscription_subtotal": price["subtotal"],
             "subscription_gst": price["gst_amount"],
             "subscription_total": price["total_with_tax"],
-            "subscription_status": status,
-            "trial_start": now.isoformat() if status == "trial" else existing.get("trial_start"),
-            "trial_end": trial_end.isoformat() if status == "trial" else existing.get("trial_end"),
-            "cycle_start": cycle_start.isoformat(),
-            "next_cycle_start": next_cycle.isoformat(),
+            "subscription_status": "trial",
+            "payment_status": "trial",
+            "trial_start": now.isoformat(),
+            "trial_end": trial_end.isoformat(),
+            "cycle_start": now.isoformat(),
+            "next_cycle_start": (now + timedelta(days=BILLING_CYCLE_DAYS)).isoformat(),
             "payment_method": body.payment_method,
             "pending_tables": None,
             "pending_subtotal": None,
             "pending_total": None,
-            "last_payment_at": now.isoformat(),
         }
         await rest_svc.update_restaurant(sess["restaurant_id"], update)
         return {
             "success": True,
-            "applied": "immediate",
+            "applied": "trial",
+            "needs_payment": False,
             **price,
             "trial_start": update["trial_start"],
             "trial_end": update["trial_end"],
             "cycle_start": update["cycle_start"],
             "next_cycle_start": update["next_cycle_start"],
+            "status": "trial",
         }
 
-    if body.tables == current_tables:
-        await rest_svc.update_restaurant(sess["restaurant_id"], {
-                "payment_method": body.payment_method,
-                "pending_tables": None,
-                "pending_subtotal": None,
-                "pending_total": None,
-            })
-        return {"success": True, "applied": "no_change", "tables": current_tables}
-
-    next_cycle_iso = existing.get("next_cycle_start")
-    cycle_start_iso = existing.get("cycle_start")
-    if not cycle_start_iso:
-        cycle_start_iso = existing.get("trial_start") or now.isoformat()
-    if not next_cycle_iso:
-        try:
-            base = _parse_dt(cycle_start_iso)
-        except Exception:
-            base = now
-        next_cycle_iso = (base + timedelta(days=30)).isoformat()
-
-    # If next cycle date is already past, apply immediately (issue #6)
-    apply_now = False
-    try:
-        if _parse_dt(next_cycle_iso) <= now:
-            apply_now = True
-    except Exception:
-        apply_now = True
-
-    if apply_now:
-        new_next = (now + timedelta(days=30)).isoformat()
+    # --- Expired: save plan intent, require payment before active ---
+    if current_status == "expired":
         update = {
+            "pending_checkout_tables": body.tables,
             "subscription_tables": body.tables,
             "subscription_subtotal": price["subtotal"],
             "subscription_gst": price["gst_amount"],
             "subscription_total": price["total_with_tax"],
             "payment_method": body.payment_method,
-            "pending_tables": None,
-            "pending_subtotal": None,
-            "pending_total": None,
-            "cycle_start": now.isoformat(),
-            "next_cycle_start": new_next,
+            # Keep expired until verify
+            "subscription_status": "expired",
+            "payment_status": "awaiting_payment",
         }
         await rest_svc.update_restaurant(sess["restaurant_id"], update)
         return {
             "success": True,
-            "applied": "immediate",
+            "applied": "awaiting_payment",
+            "needs_payment": True,
             **price,
-            "cycle_start": update["cycle_start"],
-            "next_cycle_start": new_next,
+            "status": "expired",
+        }
+
+    if body.tables == current_tables:
+        await rest_svc.update_restaurant(sess["restaurant_id"], {
+            "payment_method": body.payment_method,
+            "pending_tables": None,
+            "pending_subtotal": None,
+            "pending_total": None,
+        })
+        return {"success": True, "applied": "no_change", "tables": current_tables, "needs_payment": False}
+
+    next_cycle_iso = existing.get("next_cycle_start")
+    cycle_start_iso = existing.get("cycle_start") or existing.get("trial_start") or now.isoformat()
+    if not next_cycle_iso:
+        base = parse_dt(cycle_start_iso) or now
+        next_cycle_iso = (base + timedelta(days=BILLING_CYCLE_DAYS)).isoformat()
+
+    # Mid-cycle: schedule for next cycle (charged on next paid renewal)
+    # Increasing tables mid-cycle requires payment to apply immediately
+    increasing = int(body.tables) > int(current_tables or 0)
+    next_dt = parse_dt(next_cycle_iso)
+    cycle_past = bool(next_dt and next_dt <= now)
+
+    if increasing and (cycle_past or current_status == "active"):
+        # Require payment to apply more tables now
+        await rest_svc.update_restaurant(sess["restaurant_id"], {
+            "pending_checkout_tables": body.tables,
+            "payment_method": body.payment_method,
+            "payment_status": "awaiting_upgrade_payment",
+        })
+        return {
+            "success": True,
+            "applied": "awaiting_payment",
+            "needs_payment": True,
+            "current_tables": current_tables,
+            "pending_tables": body.tables,
+            **price,
+            "message": "Pay now to activate the higher table count.",
         }
 
     pending_update = {
@@ -226,6 +203,7 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     return {
         "success": True,
         "applied": "next_cycle",
+        "needs_payment": False,
         "current_tables": current_tables,
         "pending_tables": body.tables,
         "pending_total": price["total_with_tax"],
@@ -236,6 +214,16 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
 
 @router.put("/subscription/autopay")
 async def toggle_autopay(body: dict, sess=Depends(require_manager)):
+    """Preference flag only — real Razorpay recurring is not enabled yet."""
     enable = bool(body.get("enabled", False))
-    await rest_svc.update_restaurant(sess["restaurant_id"], {"autopay_enabled": enable})
-    return {"success": True, "autopay_enabled": enable}
+    await rest_svc.update_restaurant(sess["restaurant_id"], {
+        "autopay_enabled": enable,
+        "autopay_ready": False,
+    })
+    return {
+        "success": True,
+        "autopay_enabled": enable,
+        "autopay_ready": False,
+        "autopay_supported": False,
+        "message": "Autopay preference saved. Automatic monthly charging will be enabled once Razorpay mandates are configured.",
+    }

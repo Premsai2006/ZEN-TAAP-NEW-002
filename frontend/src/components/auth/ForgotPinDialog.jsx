@@ -42,11 +42,11 @@ export default function ForgotPinDialog({ open, onClose }) {
       const { data } = await api.post("/auth/request-otp", { contact_number: contact });
       setMaskedPhone(data.message || "");
       setStep("otp");
-      // Demo mode — show OTP in toast so user can complete the flow without SMS gateway
+      // Demo mode — show OTP in toast so local testing works without SMTP
       if (data.demo_otp) {
         toast.success(`Demo OTP: ${data.demo_otp}`, { duration: 10000 });
       } else {
-        toast.success(data.message || "Code sent to your phone.");
+        toast.success(data.message || "Code sent to your email.");
       }
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't send the code. Please try again."));
@@ -97,8 +97,8 @@ export default function ForgotPinDialog({ open, onClose }) {
           </AlertDialogTitle>
           <AlertDialogDescription>
             {step === "phone"
-              ? "Enter the phone number you registered with. We'll send a 6-digit OTP to verify it's you."
-              : `We sent a one-time code to ${maskedPhone || "your phone"}. The code is valid for 5 minutes.`}
+              ? "Enter the phone number you registered with. We'll email a 6-digit OTP to the address saved on your Profile."
+              : `${maskedPhone || "We sent a one-time code to your email"}. The code is valid for 5 minutes.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

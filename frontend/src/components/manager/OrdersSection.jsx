@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import BillModal from "@/components/manager/BillModal";
 
-const STATUSES = ["all", "new", "cooking", "done", "delivered"];
+const STATUSES = ["all", "new", "cooking", "done", "delivered", "paid", "cancelled"];
 
 const statusBadge = (s) => {
   const cls = {
@@ -13,6 +13,8 @@ const statusBadge = (s) => {
     cooking: "badge-cooking",
     done: "badge-done",
     delivered: "badge-delivered",
+    paid: "badge-done",
+    cancelled: "badge-na",
   }[s] || "badge-new";
   return <span className={`badge ${cls}`}>{s}</span>;
 };
@@ -67,9 +69,14 @@ export const GrowthPill = ({ pct, label = "vs prev 7d" }) => {
   );
 };
 
-export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh, locked }) {
+export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh, locked, menu = [] }) {
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
+  const [walkInOpen, setWalkInOpen] = useState(false);
+  const [wiTable, setWiTable] = useState(0);
+  const [wiCart, setWiCart] = useState({}); // id -> { item, qty }
+  const [wiNotes, setWiNotes] = useState("");
+  const [wiPlacing, setWiPlacing] = useState(false);
 
   const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
@@ -85,6 +92,27 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
       if (err?.response?.status !== 402) {
         toast.error(friendlyError(err, "Couldn't update that order. Please try again."));
       }
+    }
+  };
+
+  const placeWalkIn = async () => {
+    if (locked) return toast.error("Subscribe to ZenTaap to place orders.");
+    const items = Object.values(wiCart)
+      .filter((x) => x.qty > 0)
+      .map(({ item, qty }) => ({ name: item.name, qty, price: item.price }));
+    if (!items.length) return toast.error("Add at least one item.");
+    setWiPlacing(true);
+    try {
+      await api.post("/orders", { table: Number(wiTable) || 0, items, notes: wiNotes || undefined });
+      toast.success(Number(wiTable) > 0 ? `Order placed for Table ${wiTable}` : "Walk-in order placed");
+      setWalkInOpen(false);
+      setWiCart({});
+      setWiNotes("");
+      onRefresh();
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't place the order."));
+    } finally {
+      setWiPlacing(false);
     }
   };
 
@@ -162,17 +190,31 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
       <div className="orders-section">
         <div className="section-header">
           <div className="section-header-title">All Orders</div>
-          <div className="filter-tabs">
-            {STATUSES.map((s) => (
-              <button
-                key={s}
-                className={`filter-tab ${filter === s ? "active" : ""}`}
-                onClick={() => setFilter(s)}
-                data-testid={`filter-${s}`}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="mini-btn primary"
+              data-testid="walk-in-order-btn"
+              disabled={locked}
+              onClick={() => {
+                if (locked) return toast.error("Subscribe to ZenTaap to place orders.");
+                setWalkInOpen(true);
+              }}
+            >
+              + Walk-in / Counter order
+            </button>
+            <div className="filter-tabs">
+              {STATUSES.map((s) => (
+                <button
+                  key={s}
+                  className={`filter-tab ${filter === s ? "active" : ""}`}
+                  onClick={() => setFilter(s)}
+                  data-testid={`filter-${s}`}
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="table-scroll">
@@ -227,6 +269,22 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                         ) : (
                           <span className="order-action-spacer" aria-hidden="true" />
                         )}
+                        {!["cancelled", "paid"].includes(o.status) && (
+                          <button
+                            className="mini-btn"
+                            onClick={() => {
+                              if (locked) return toast.error("Subscribe to ZenTaap to manage orders.");
+                              if (!window.confirm(`Cancel order #${o.order_number}?`)) return;
+                              updateOrder(o.id, "cancelled");
+                            }}
+                            data-testid={`order-cancel-${o.order_number}`}
+                            disabled={locked}
+                            title="Cancel / void"
+                            style={{ color: "var(--red)" }}
+                          >
+                            Cancel
+                          </button>
+                        )}
                         <button
                           className="mini-btn primary"
                           onClick={() => {
@@ -238,7 +296,7 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                           }}
                           data-testid={`generate-bill-${o.order_number}`}
                           title={locked ? "Requires subscription" : "Generate Bill"}
-                          disabled={locked}
+                          disabled={locked || o.status === "cancelled"}
                         >
                           <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
                           Bill
@@ -254,7 +312,152 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
       </div>
 
       {billOrder && (
-        <BillModal order={billOrder} settings={settings} onClose={() => setBillOrder(null)} />
+        <BillModal
+          order={billOrder}
+          settings={settings}
+          onClose={() => setBillOrder(null)}
+          onSettled={onRefresh}
+        />
+      )}
+
+      {walkInOpen && (
+        <div
+          className="bill-modal-overlay"
+          data-testid="walk-in-modal"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            zIndex: 50,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+          onClick={() => setWalkInOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--line)",
+              borderRadius: 14,
+              padding: 18,
+              maxWidth: 520,
+              width: "100%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <div className="font-serif" style={{ fontSize: 18, color: "var(--gold)", marginBottom: 12 }}>
+              Walk-in / Counter order
+            </div>
+            <label className="form-label">Table (0 = walk-in)</label>
+            <input
+              type="number"
+              min={0}
+              value={wiTable}
+              onChange={(e) => setWiTable(e.target.value)}
+              data-testid="walk-in-table"
+              style={{
+                width: "100%",
+                marginBottom: 12,
+                background: "var(--bg)",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+                borderRadius: 8,
+                padding: "10px 12px",
+              }}
+            />
+            <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 12 }}>
+              {(menu || []).filter((m) => m.available !== false).map((it) => {
+                const qty = wiCart[it.id]?.qty || 0;
+                return (
+                  <div
+                    key={it.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 0",
+                      borderBottom: "1px solid var(--line)",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{it.name}</div>
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>₹{it.price}</div>
+                    </div>
+                    <div className="qty-stepper">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setWiCart((c) => {
+                            const cur = c[it.id]?.qty || 0;
+                            if (cur <= 1) {
+                              const n = { ...c };
+                              delete n[it.id];
+                              return n;
+                            }
+                            return { ...c, [it.id]: { item: it, qty: cur - 1 } };
+                          })
+                        }
+                      >
+                        −
+                      </button>
+                      <span className="qty-stepper-num">{qty}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setWiCart((c) => ({
+                            ...c,
+                            [it.id]: { item: it, qty: (c[it.id]?.qty || 0) + 1 },
+                          }))
+                        }
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {(menu || []).length === 0 && (
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>No menu items loaded.</div>
+              )}
+            </div>
+            <label className="form-label">Notes (optional)</label>
+            <input
+              value={wiNotes}
+              onChange={(e) => setWiNotes(e.target.value)}
+              placeholder="e.g. less spicy"
+              data-testid="walk-in-notes"
+              style={{
+                width: "100%",
+                marginBottom: 14,
+                background: "var(--bg)",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+                borderRadius: 8,
+                padding: "10px 12px",
+              }}
+            />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" className="submit-btn ghost" onClick={() => setWalkInOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="submit-btn"
+                data-testid="walk-in-place-btn"
+                disabled={wiPlacing}
+                onClick={placeWalkIn}
+                style={{ flex: 1 }}
+              >
+                {wiPlacing ? "Placing…" : "Place order"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,10 +1,14 @@
 import { useRef, useState } from "react";
 import { Printer, X, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 
-export default function BillModal({ order, settings, onClose }) {
+export default function BillModal({ order, settings, onClose, onSettled }) {
   const [waPhone, setWaPhone] = useState("");
   const [showWa, setShowWa] = useState(false);
+  const [payMode, setPayMode] = useState("cash");
+  const [settling, setSettling] = useState(false);
   const printRef = useRef(null);
   if (!order) return null;
   const s = settings || {};
@@ -295,6 +299,57 @@ export default function BillModal({ order, settings, onClose }) {
         </div>
 
         <div className="no-print" style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+          {order.status !== "paid" && order.status !== "cancelled" && (
+            <div style={{ width: "100%", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <select
+                value={payMode}
+                onChange={(e) => setPayMode(e.target.value)}
+                data-testid="bill-pay-mode"
+                style={{
+                  flex: "1 1 120px",
+                  background: "var(--bg)",
+                  border: "1px solid var(--line)",
+                  color: "var(--text)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                }}
+              >
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                <option value="other">Other</option>
+              </select>
+              <button
+                type="button"
+                className="submit-btn"
+                data-testid="bill-mark-paid-btn"
+                disabled={settling}
+                onClick={async () => {
+                  setSettling(true);
+                  try {
+                    await api.post(`/orders/${order.id}/settle`, {
+                      payment_mode: payMode,
+                      clear_table: true,
+                    });
+                    toast.success(
+                      order.table > 0
+                        ? `Marked paid (${payMode}) · Table ${order.table} cleared`
+                        : `Marked paid (${payMode})`
+                    );
+                    onSettled?.();
+                    onClose();
+                  } catch (err) {
+                    toast.error(friendlyError(err, "Couldn't settle this bill."));
+                  } finally {
+                    setSettling(false);
+                  }
+                }}
+                style={{ flex: "2 1 160px", background: "var(--green, #22c55e)", color: "#fff" }}
+              >
+                {settling ? "Saving…" : "Mark Paid & Clear Table"}
+              </button>
+            </div>
+          )}
           <button
             onClick={handlePrint}
             className="submit-btn"

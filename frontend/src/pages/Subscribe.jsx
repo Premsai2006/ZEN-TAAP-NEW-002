@@ -171,17 +171,10 @@ export default function Subscribe() {
     if (!pricing) return;
     setPaying(true);
     try {
-      // 1) Persist plan choice on the backend (trial / deferred change).
       const { data: planResp } = await api.post("/subscription", { tables, payment_method: method });
 
-      // 2) If we have a deferred next-cycle change, no payment is needed now.
       if (planResp.applied === "next_cycle") {
         toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
-        navigate("/manager");
-        return;
-      }
-      if (planResp.applied === "immediate" && hasActive) {
-        toast.success(`Plan updated to ${tables} tables · effective immediately.`);
         navigate("/manager");
         return;
       }
@@ -190,17 +183,24 @@ export default function Subscribe() {
         navigate("/manager");
         return;
       }
+      if (planResp.applied === "trial") {
+        toast.success(`Free trial started — ends ${fmtDate(planResp.trial_end)}. Pay anytime before it ends.`);
+        // Optional: open checkout for first paid cycle now
+      }
 
-      // 3) Trial started — now launch Razorpay checkout for the first paid cycle.
-      //    (The trial is the 4-day free grace before the first charge.)
-      const { data: order } = await api.post("/payments/create-order", { tables });
-      if (!order.configured) {
-        // No API keys yet → fall back to public payment-page redirect.
-        toast.success("Trial started. Opening Razorpay payment page…");
-        window.open(`${order.fallback_link}?amount=${(order.amount / 100).toFixed(0)}`, "_blank");
+      // Payment required (expired renew / upgrade) OR optional pay after trial start
+      const needsPay = planResp.needs_payment || planResp.applied === "awaiting_payment";
+      if (!needsPay && planResp.applied === "trial") {
         navigate("/manager");
         return;
       }
+      if (!needsPay && planResp.applied === "immediate") {
+        toast.success(`Plan updated to ${tables} tables.`);
+        navigate("/manager");
+        return;
+      }
+
+      const { data: order } = await api.post("/payments/create-order", { tables });
       const ok = await loadRazorpayScript();
       if (!ok || !window.Razorpay) {
         toast.error("Payment couldn't start. Please refresh the page and try again.");
@@ -211,27 +211,36 @@ export default function Subscribe() {
         amount: order.amount,
         currency: order.currency,
         name: "ZenTaap",
-        description: `${tables} tables · monthly subscription · autopay enabled`,
+        description: `${tables} tables · monthly subscription`,
         order_id: order.order_id,
         theme: { color: "#e87d2f" },
         prefill: { method },
-        notes: { tables: String(tables), enable_autopay: "true" },
+        notes: { tables: String(tables) },
         handler: async (resp) => {
           try {
-            await api.post("/payments/verify", {
+            const { data: verified } = await api.post("/payments/verify", {
               razorpay_order_id: resp.razorpay_order_id,
               razorpay_payment_id: resp.razorpay_payment_id,
               razorpay_signature: resp.razorpay_signature,
-              enable_autopay: true,
+              enable_autopay: false,
             });
-            toast.success("Payment successful — Autopay enabled for next cycles!");
+            toast.success(
+              verified?.next_cycle_start
+                ? `Payment successful — next billing ${fmtDate(verified.next_cycle_start)}`
+                : "Payment successful — subscription active!"
+            );
             navigate("/manager");
           } catch (err) {
             toast.error(friendlyError(err, "We couldn't confirm your payment. Please try again or contact support."));
           }
         },
         modal: {
-          ondismiss: () => toast.info("Payment cancelled — trial continues, you can pay later."),
+          ondismiss: () =>
+            toast.info(
+              needsPay
+                ? "Payment cancelled — account stays locked until payment succeeds."
+                : "Payment cancelled — you can pay later from Subscription."
+            ),
         },
       };
       new window.Razorpay(rzpOptions).open();

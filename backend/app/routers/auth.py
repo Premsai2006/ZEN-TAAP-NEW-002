@@ -12,6 +12,8 @@ from app.models import (
 )
 from app.services import auth_service as auth
 from app.services import restaurants as rest_svc
+from app.services.pins import hash_pin, verify_pin, needs_rehash
+from app.services.sms import send_otp_email, otp_delivery_configured
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -63,7 +65,7 @@ async def signup(req: SignupRequest, request: Request, response: Response):
         "phone": contact,
         "phone_key": phone_key,
         "email": (req.email or "").strip(),
-        "pin": req.pin,
+        "pin": hash_pin(req.pin),
         "logo_url": "",
         "gst_number": "",
         "gst_rate": None,
@@ -103,8 +105,12 @@ async def login(req: LoginRequest, request: Request, response: Response):
     if not restaurant or not restaurant.get("pin"):
         await auth.record_login_failure(request)
 
-    if req.pin != restaurant.get("pin"):
+    if not verify_pin(req.pin, restaurant.get("pin") if restaurant else None):
         await auth.record_login_failure(request)
+
+    # Upgrade legacy plaintext PIN to bcrypt on successful login
+    if restaurant and needs_rehash(restaurant.get("pin")):
+        await rest_svc.update_restaurant(restaurant["id"], {"pin": hash_pin(req.pin)})
 
     await auth.clear_login_failures(request)
     sess = await auth.register_session(restaurant["id"], req.device_id, req.device_label)
@@ -150,10 +156,10 @@ async def revoke_session(device_id: str, sess=Depends(require_manager)):
 @router.post("/change-pin")
 async def change_pin(req: ChangePinRequest, sess=Depends(require_manager)):
     restaurant = await rest_svc.require_restaurant_id(sess["restaurant_id"])
-    if req.old_pin != restaurant.get("pin"):
+    if not verify_pin(req.old_pin, restaurant.get("pin")):
         raise HTTPException(status_code=401, detail="Current PIN is incorrect. Please try again.")
     auth.validate_pin(req.new_pin, new=True)
-    await rest_svc.update_restaurant(sess["restaurant_id"], {"pin": req.new_pin})
+    await rest_svc.update_restaurant(sess["restaurant_id"], {"pin": hash_pin(req.new_pin)})
     return {"success": True}
 
 
@@ -174,6 +180,14 @@ async def request_otp(body: RequestOtpBody):
     given = auth.digits(body.contact_number)
     if not saved or saved[-7:] != given[-7:]:
         raise HTTPException(status_code=401, detail="That phone number does not match our records.")
+
+    to_email = (restaurant.get("email") or "").strip()
+    if not to_email or "@" not in to_email:
+        raise HTTPException(
+            status_code=400,
+            detail="No email is saved on this account. Add an email in Profile, then try Forgot PIN again.",
+        )
+
     otp = f"{secrets.randbelow(1_000_000):06d}"
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
     await db.otps.update_one(
@@ -183,13 +197,40 @@ async def request_otp(body: RequestOtpBody):
             "restaurant_id": restaurant["id"],
             "contact_last7": saved[-7:],
             "expires_at": expires.isoformat(),
+            "channel": "email",
+            "email": to_email,
         }},
         upsert=True,
     )
-    masked = f"+91 •••••{saved[-4:]}" if len(saved) >= 4 else "your phone"
-    resp = {"success": True, "message": f"Code sent to {masked}"}
+
+    # Mask email for UI: j***@gmail.com
+    local, _, domain = to_email.partition("@")
+    masked = f"{local[:1]}***@{domain}" if local and domain else "your email"
+
+    sent_ok, _detail = await send_otp_email(
+        to_email,
+        otp,
+        restaurant_name=restaurant.get("restaurant_name") or "",
+    )
+    resp = {
+        "success": True,
+        "message": f"Code sent to {masked}",
+        "channel": "email",
+        "email_delivered": bool(sent_ok),
+    }
     if DEMO_MODE:
         resp["demo_otp"] = otp
+        return resp
+    if not otp_delivery_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Email OTP is not configured. Set SMTP_USER and SMTP_PASSWORD (Gmail App Password) on the server.",
+        )
+    if not sent_ok:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not send the OTP email. Check SMTP settings and try again.",
+        )
     return resp
 
 
@@ -212,7 +253,7 @@ async def verify_otp(body: VerifyOtpBody):
     if rec.get("otp") != body.otp.strip():
         raise HTTPException(status_code=401, detail="Incorrect OTP. Please try again.")
     auth.validate_pin(body.new_pin, new=True)
-    await rest_svc.update_restaurant(restaurant["id"], {"pin": body.new_pin})
+    await rest_svc.update_restaurant(restaurant["id"], {"pin": hash_pin(body.new_pin)})
     await db.otps.delete_one({"key": f"pin_reset:{restaurant['id']}"})
     return {"success": True}
 
@@ -225,8 +266,10 @@ async def kitchen_login(body: KitchenLoginBody):
     expected = restaurant.get("kitchen_pin") or ""
     if not expected:
         raise HTTPException(status_code=404, detail="Kitchen PIN is not set yet. Ask your manager to set one up.")
-    if body.pin != expected:
+    if not verify_pin(body.pin, expected):
         raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN. Please try again.")
+    if needs_rehash(expected):
+        await rest_svc.update_restaurant(restaurant["id"], {"kitchen_pin": hash_pin(body.pin)})
     sess = await auth.register_session(
         restaurant["id"], None, "Kitchen display", scope="kitchen"
     )
@@ -240,4 +283,7 @@ async def kitchen_login(body: KitchenLoginBody):
 
 @router.post("/customer-login")
 async def customer_login(body: CustomerLoginBody):
-    return {"success": True, "token": f"cust-{uuid.uuid4()}"}
+    raise HTTPException(
+        status_code=410,
+        detail="Customer PIN login is not used. Guests order via the restaurant QR link.",
+    )

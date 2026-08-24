@@ -17,6 +17,16 @@ RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "")
 
+# OTP via Gmail SMTP (Google App Password)
+# SMTP_USER=you@gmail.com
+# SMTP_PASSWORD=xxxx xxxx xxxx xxxx   # 16-char App Password
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or "587")
+SMTP_USER = os.environ.get("SMTP_USER", "") or os.environ.get("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") or os.environ.get("SMTP_APP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "") or (f"ZenTaap <{SMTP_USER}>" if SMTP_USER else "")
+SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() in ("1", "true", "yes")
+
 MGR_COOKIE = "mgr_token"
 MAX_DEVICES = 4
 DEFAULT_PIN = "123456"

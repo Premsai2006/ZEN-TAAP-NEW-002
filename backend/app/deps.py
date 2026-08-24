@@ -3,6 +3,7 @@ from fastapi import HTTPException, Request, Response, Depends
 from app.config import MGR_COOKIE, DEMO_MODE
 from app.database import db
 from app.services import restaurants as rest_svc
+from app.services.subscription_access import refresh_subscription_status, has_access_status
 
 
 def extract_manager_token(request: Request) -> str:
@@ -50,7 +51,6 @@ async def require_manager(request: Request):
 async def require_manager_or_kitchen(request: Request):
     token = extract_manager_token(request)
     if not token:
-        # Also accept kitchen token from Authorization only
         auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
         if auth.lower().startswith("bearer "):
             token = auth.split(" ", 1)[1].strip()
@@ -69,9 +69,9 @@ async def require_manager_or_kitchen(request: Request):
 
 
 async def has_active_subscription(restaurant_id: str) -> bool:
-    doc = await rest_svc.get_by_id(restaurant_id) or {}
-    status = doc.get("subscription_status", "none")
-    return status in ("trial", "active")
+    """Enforce trial_end + billing cycle (with short grace) on every gate check."""
+    _doc, status = await refresh_subscription_status(restaurant_id)
+    return has_access_status(status)
 
 
 async def require_subscription(sess: dict = Depends(require_manager)):

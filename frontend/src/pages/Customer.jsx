@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { useInterval } from "@/hooks/useInterval";
 
-function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing }) {
+function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing, notes, setNotes }) {
   const total = cart.reduce((sum, l) => sum + l.qty * l.price, 0);
 
   const updateQty = (id, delta) => {
@@ -76,6 +76,25 @@ function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing
 
         {cart.length > 0 && (
           <div className="cart-footer">
+            <label className="form-label" style={{ display: "block", marginBottom: 6 }}>
+              Notes (optional)
+            </label>
+            <input
+              value={notes || ""}
+              onChange={(e) => setNotes?.(e.target.value)}
+              placeholder="e.g. less spicy, no onion"
+              data-testid="cart-notes"
+              style={{
+                width: "100%",
+                marginBottom: 12,
+                background: "var(--bg)",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+                borderRadius: 8,
+                padding: "10px 12px",
+                fontSize: 13,
+              }}
+            />
             <div className="cart-total-row">
               <span>Total</span>
               <span className="total-amt" data-testid="cart-total">₹{total}</span>
@@ -142,6 +161,7 @@ export default function Customer() {
   const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber }
   const [restaurantName, setRestaurantName] = useState("");
   const [notFound, setNotFound] = useState(false);
+  const [orderNotes, setOrderNotes] = useState("");
 
   // Lock the table number from URL (?table=N). When missing/invalid -> null (walk-in).
   const tableFromUrl = useMemo(() => {
@@ -204,9 +224,14 @@ export default function Customer() {
     setPlacing(true);
     try {
       const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price }));
-      const { data } = await api.post(`/r/${slug}/orders`, { table: tableN || 0, items });
+      const { data } = await api.post(`/r/${slug}/orders`, {
+        table: tableN || 0,
+        items,
+        notes: orderNotes.trim() || undefined,
+      });
       setSuccessInfo({ tableNum: tableN || null, orderNumber: data?.order_number || null });
       setCart([]);
+      setOrderNotes("");
       setDrawerOpen(false);
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't place your order. Please try again."));
@@ -361,6 +386,8 @@ export default function Customer() {
           onClose={() => setDrawerOpen(false)}
           onPlaceOrder={placeOrder}
           placing={placing}
+          notes={orderNotes}
+          setNotes={setOrderNotes}
         />
       )}
 
