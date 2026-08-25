@@ -1,7 +1,7 @@
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 from app.database import db
-from app.deps import require_manager, require_subscription
+from app.deps import require_manager, require_subscription, assert_role
 from app.models import Category, CategoryCreate
 
 router = APIRouter(prefix="/categories", tags=["categories"])
@@ -17,6 +17,7 @@ async def list_categories(sess=Depends(require_manager)):
 
 @router.post("", response_model=Category)
 async def create_category(body: CategoryCreate, sess=Depends(require_subscription)):
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     name = body.name.strip()
     if not name:
@@ -35,6 +36,7 @@ async def create_category(body: CategoryCreate, sess=Depends(require_subscriptio
 
 @router.put("/{cat_id}", response_model=Category)
 async def rename_category(cat_id: str, body: CategoryCreate, sess=Depends(require_subscription)):
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     name = body.name.strip()
     if not name:
@@ -64,6 +66,7 @@ async def rename_category(cat_id: str, body: CategoryCreate, sess=Depends(requir
 
 @router.delete("/{cat_id}")
 async def delete_category(cat_id: str, sess=Depends(require_subscription)):
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     cat = await db.categories.find_one({"id": cat_id, "restaurant_id": rid}, {"_id": 0})
     if not cat:

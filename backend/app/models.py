@@ -117,6 +117,7 @@ class OrderItem(BaseModel):
     name: str
     qty: int
     price: float
+    menu_item_id: Optional[str] = None
 
 
 class Order(BaseModel):
@@ -158,6 +159,7 @@ class SignupRequest(BaseModel):
     pin: str
     email: Optional[str] = None
     slug: Optional[str] = None
+    otp: str
 
 
 class ProfileUpdate(BaseModel):
@@ -221,3 +223,34 @@ class PricingUpdateBody(BaseModel):
     gst_rate_pct: Optional[float] = None
     min_tables: Optional[int] = None
     max_tables: Optional[int] = None
+
+
+class SignupOtpBody(BaseModel):
+    contact_number: str
+    email: Optional[str] = None
+
+
+class StaffCreateBody(BaseModel):
+    name: str
+    role: str
+    pin: str
+
+
+class StaffActiveBody(BaseModel):
+    active: bool
+
+
+class StaffPinBody(BaseModel):
+    pin: str
+
+
+class AdminSuspendBody(BaseModel):
+    suspended: bool
+
+
+class AdminResetPinBody(BaseModel):
+    new_pin: Optional[str] = None
+
+
+class AdminBillingOverrideBody(BaseModel):
+    billing_override_paise: Optional[int] = None

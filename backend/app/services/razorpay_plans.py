@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from app.database import db
-from app.services.pricing import compute_price, compute_price_for_restaurant
+from app.services.pricing import compute_price, compute_price_for_restaurant, hydrate_pricing
 from app.services.razorpay_client import razorpay_client
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ async def get_plan_id_for_tables(tables: int, *, amount_paise: Optional[int] = N
 
 
 async def get_plan_id_for_restaurant(restaurant: dict, tables: int) -> str:
+    await hydrate_pricing()
     price = compute_price_for_restaurant(int(tables), restaurant)
     if price.get("billing_override"):
         return await get_plan_id_for_tables(int(tables), amount_paise=price["amount_paise"])
@@ -52,6 +53,7 @@ async def ensure_plan_for_tables(
     amount_paise: Optional[int] = None,
     override: bool = False,
 ) -> str:
+    await hydrate_pricing()
     price = compute_price(int(tables))
     if amount_paise is None:
         amount_paise = int(round(price["total_with_tax"] * 100))

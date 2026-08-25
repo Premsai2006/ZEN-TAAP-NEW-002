@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  ClipboardList,
   Building2,
   CreditCard,
   IndianRupee,
@@ -77,6 +78,10 @@ export default function Admin() {
   const [selected, setSelected] = useState(null);
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwSaving, setPwSaving] = useState(false);
+  const [audit, setAudit] = useState([]);
+  const [opsBusy, setOpsBusy] = useState(false);
+  const [overrideRs, setOverrideRs] = useState("");
+  const [shownPin, setShownPin] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +174,95 @@ export default function Admin() {
     }
   };
 
+  const openRestaurant = async (row) => {
+    const next = selected?.id === row.id ? null : row;
+    setSelected(next);
+    setShownPin("");
+    if (!next) return;
+    try {
+      const { data } = await api.get(`/admin/restaurants/${row.id}`);
+      setSelected({ ...row, ...data });
+      const paise = data.billing_override_paise;
+      setOverrideRs(paise != null ? String(paise / 100) : "");
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't load restaurant."));
+    }
+  };
+
+  const loadAudit = useCallback(async () => {
+    try {
+      const { data } = await api.get("/admin/audit");
+      setAudit(data.events || []);
+    } catch (err) {
+      if (err?.response?.status !== 401) {
+        toast.error(friendlyError(err, "Couldn't load audit log."));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "audit") loadAudit();
+  }, [tab, loadAudit]);
+
+  const suspendRestaurant = async (suspended) => {
+    if (!selected?.id) return;
+    setOpsBusy(true);
+    try {
+      await api.post(`/admin/restaurants/${selected.id}/suspend`, { suspended });
+      toast.success(suspended ? "Restaurant suspended — staff are signed out." : "Restaurant unsuspended.");
+      setSelected((s) => ({ ...s, suspended }));
+      load();
+      loadAudit();
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't update restaurant."));
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
+  const resetOwnerPin = async () => {
+    if (!selected?.id) return;
+    if (!window.confirm(`Reset owner PIN for ${selected.restaurant_name}? They will be signed out.`)) return;
+    setOpsBusy(true);
+    try {
+      const { data } = await api.post(`/admin/restaurants/${selected.id}/reset-pin`, {});
+      setShownPin(data.new_pin || "");
+      toast.success("Owner PIN reset. Share it once, then they should change it.");
+      loadAudit();
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't reset PIN."));
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
+  const saveOverride = async () => {
+    if (!selected?.id) return;
+    const raw = overrideRs.trim();
+    let paise = null;
+    if (raw) {
+      const rupees = Number(raw);
+      if (!Number.isFinite(rupees) || rupees < 1 || rupees > 10) {
+        return toast.error("Override must be ₹1–₹10, or empty to clear.");
+      }
+      paise = Math.round(rupees * 100);
+    }
+    setOpsBusy(true);
+    try {
+      const { data } = await api.put(`/admin/restaurants/${selected.id}/billing-override`, {
+        billing_override_paise: paise,
+      });
+      setSelected((s) => ({ ...s, billing_override_paise: data.billing_override_paise }));
+      toast.success(paise == null ? "Billing override cleared." : `Checkout override set to ₹${(paise / 100).toFixed(0)}.`);
+      load();
+      loadAudit();
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't save override."));
+    } finally {
+      setOpsBusy(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return restaurants;
@@ -221,6 +315,7 @@ export default function Admin() {
           { key: "restaurants", label: "Restaurants", icon: Store },
           { key: "pricing", label: "Pricing", icon: IndianRupee },
           { key: "account", label: "Account", icon: KeyRound },
+          { key: "audit", label: "Audit", icon: ClipboardList },
         ].map((t) => {
           const Icon = t.icon;
           return (
@@ -349,6 +444,7 @@ export default function Admin() {
                     <th>Manager</th>
                     <th>Phone</th>
                     <th>Status</th>
+                    <th>Access</th>
                     <th>Tables</th>
                     <th>Monthly</th>
                     <th>Renews</th>
@@ -358,7 +454,7 @@ export default function Admin() {
                   {filtered.map((r) => (
                     <tr
                       key={r.id}
-                      onClick={() => setSelected(selected?.id === r.id ? null : r)}
+                      onClick={() => openRestaurant(r)}
                       style={{ cursor: "pointer", background: selected?.id === r.id ? "rgba(232,125,47,0.08)" : undefined }}
                     >
                       <td>
@@ -368,6 +464,7 @@ export default function Admin() {
                       <td>{r.manager_name || "—"}</td>
                       <td>{r.contact_number || "—"}</td>
                       <td><StatusPill status={r.status} /></td>
+                      <td>{r.suspended ? <span style={{ color: "var(--red)", fontWeight: 700 }}>Suspended</span> : "—"}</td>
                       <td>{r.tables ?? "—"}</td>
                       <td>{r.monthly_total ? fmtINR(r.monthly_total) : "—"}</td>
                       <td>{fmtDate(r.next_cycle_start)}</td>
@@ -380,13 +477,84 @@ export default function Admin() {
           {selected && (
             <div className="add-item-card" style={{ marginTop: 14 }} data-testid="admin-restaurant-detail">
               <div className="font-serif" style={{ fontSize: 18, marginBottom: 8 }}>{selected.restaurant_name}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, fontSize: 13, color: "var(--muted)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>
                 <div>Email: <b style={{ color: "var(--text)" }}>{selected.email || "—"}</b></div>
                 <div>Autopay: <b style={{ color: "var(--text)" }}>{selected.autopay_enabled ? "On" : "Off"}</b></div>
                 <div>Started: <b style={{ color: "var(--text)" }}>{fmtDate(selected.cycle_start)}</b></div>
                 <div>Last payment: <b style={{ color: "var(--text)" }}>{fmtDate(selected.last_payment_at)}</b></div>
                 <div>Payment method: <b style={{ color: "var(--text)" }}>{selected.payment_method || "—"}</b></div>
                 <div>Trial ends: <b style={{ color: "var(--text)" }}>{fmtDate(selected.trial_end)}</b></div>
+                <div>Access: <b style={{ color: selected.suspended ? "var(--red)" : "var(--text)" }}>{selected.suspended ? "Suspended" : "Open"}</b></div>
+                <div>
+                  Checkout override:{" "}
+                  <b style={{ color: "var(--text)" }}>
+                    {selected.billing_override_paise != null
+                      ? `₹${(selected.billing_override_paise / 100).toFixed(0)}`
+                      : "None"}
+                  </b>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                <button
+                  type="button"
+                  className="submit-btn ghost"
+                  disabled={opsBusy}
+                  onClick={() => suspendRestaurant(!selected.suspended)}
+                  data-testid="admin-suspend-btn"
+                >
+                  {selected.suspended ? "Unsuspend" : "Suspend restaurant"}
+                </button>
+                <button
+                  type="button"
+                  className="submit-btn ghost"
+                  disabled={opsBusy}
+                  onClick={resetOwnerPin}
+                  data-testid="admin-reset-pin-btn"
+                >
+                  Reset owner PIN
+                </button>
+              </div>
+              {shownPin && (
+                <div
+                  data-testid="admin-shown-pin"
+                  style={{
+                    marginBottom: 14,
+                    padding: 10,
+                    borderRadius: 8,
+                    border: "1px solid rgba(232,125,47,0.4)",
+                    background: "rgba(232,125,47,0.08)",
+                    fontFamily: "monospace",
+                    letterSpacing: 4,
+                    fontSize: 18,
+                  }}
+                >
+                  New PIN: {shownPin}
+                </div>
+              )}
+              <label className="form-label">Billing override (₹1–₹10, empty to clear)</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  step="1"
+                  value={overrideRs}
+                  onChange={(e) => setOverrideRs(e.target.value)}
+                  placeholder="e.g. 1"
+                  data-testid="admin-override-input"
+                  className="admin-input"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="submit-btn"
+                  disabled={opsBusy}
+                  onClick={saveOverride}
+                  data-testid="admin-override-save"
+                >
+                  Save override
+                </button>
               </div>
             </div>
           )}
@@ -545,6 +713,43 @@ export default function Admin() {
             {pwSaving ? "Updating…" : "Update password"}
           </button>
         </form>
+      )}
+
+      {tab === "audit" && (
+        <div className="add-item-card" data-testid="admin-audit">
+          <div className="font-serif" style={{ fontSize: 22, marginBottom: 6 }}>Audit log</div>
+          <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>
+            Recent admin actions — suspend, PIN reset, billing override, pricing, password change.
+          </div>
+          {(audit || []).length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>No events yet.</div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Restaurant</th>
+                    <th>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {audit.map((e) => (
+                    <tr key={e.id || `${e.created_at}-${e.action}`}>
+                      <td>{fmtDate(e.created_at)}</td>
+                      <td>{e.actor || "—"}</td>
+                      <td>{e.action}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{e.restaurant_id || "—"}</td>
+                      <td>{e.detail || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

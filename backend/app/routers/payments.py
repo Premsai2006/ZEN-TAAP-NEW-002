@@ -7,7 +7,7 @@ from app.config import (
     RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, RAZORPAY_PAYMENT_LINK,
 )
 from app.models import RazorpayOrderBody, VerifyPaymentBody, VerifySubscriptionBody
-from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant
+from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant, hydrate_pricing
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
 from app.services.payment_activate import activate_paid_subscription, record_payment
@@ -86,6 +86,7 @@ async def create_razorpay_order(body: RazorpayOrderBody, sess=Depends(require_ma
         )
 
     doc, status = await refresh_subscription_status(rid)
+    await hydrate_pricing()
     current_tables = doc.get("subscription_tables")
     kind = "subscription"
     preserve_cycle = False

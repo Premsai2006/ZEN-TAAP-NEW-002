@@ -57,16 +57,32 @@ export default function Login() {
         device_id: deviceId,
         device_label: label,
       });
-      localStorage.setItem("mgr_authed", "1");
-      if (data.token) localStorage.setItem("mgr_token", data.token);
+      if (data.token) {
+        if (data.landing === "kitchen") {
+          localStorage.removeItem("mgr_token");
+          localStorage.removeItem("mgr_authed");
+          localStorage.removeItem("mgr_role");
+          localStorage.setItem("kitchen_token", data.token);
+          if (data.slug) localStorage.setItem("kitchen_slug", data.slug);
+        } else {
+          localStorage.removeItem("kitchen_token");
+          localStorage.setItem("mgr_authed", "1");
+          localStorage.setItem("mgr_token", data.token);
+          if (data.role) localStorage.setItem("mgr_role", data.role);
+        }
+      }
       if (data.slug) localStorage.setItem("mgr_slug", data.slug);
       if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       if (data.active_devices >= data.max_devices) {
         toast.success(`Welcome back · ${data.active_devices}/${data.max_devices} devices used`);
       } else {
-        toast.success("Welcome back");
+        toast.success(data.staff_name ? `Welcome back, ${data.staff_name}` : "Welcome back");
       }
-      navigate("/manager");
+      if (data.landing === "kitchen") {
+        navigate(data.slug ? `/kitchen/${data.slug}` : "/kitchen");
+      } else {
+        navigate("/manager");
+      }
     } catch (err) {
       if (err?.response?.status === 429) {
         setLockedUntil(Date.now() + 15 * 60 * 1000);
@@ -89,7 +105,7 @@ export default function Login() {
           Login
         </div>
         <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 26, textAlign: "center" }}>
-          Enter your registered phone number and PIN
+          Enter the restaurant phone number and your PIN
         </div>
 
         <div className="form-group" style={{ marginBottom: 14 }}>
@@ -115,7 +131,7 @@ export default function Login() {
         </div>
 
         <div className="form-group" style={{ marginBottom: 18 }}>
-          <label className="form-label">Manager PIN</label>
+          <label className="form-label">PIN</label>
           <div style={{ position: "relative" }}>
             <input
               type={showPin ? "text" : "password"}

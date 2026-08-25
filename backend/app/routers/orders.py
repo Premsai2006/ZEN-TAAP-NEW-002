@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from app.database import db
-from app.deps import require_manager, require_subscription, require_manager_or_kitchen
+from app.deps import require_manager, require_subscription, require_manager_or_kitchen, assert_role, has_active_subscription
 from app.models import Order, OrderCreate, OrderUpdate, OrderItem
 from app.services.order_pricing import reprice_items, enforce_table_limit
 from app.services import restaurants as rest_svc
@@ -29,6 +29,7 @@ async def list_orders(sess=Depends(require_manager_or_kitchen)):
 @router.post("", response_model=Order)
 async def create_order(body: OrderCreate, sess=Depends(require_subscription)):
     """Manager / counter walk-in order. Prices recalculated from menu."""
+    assert_role(sess, "owner", "manager", "cashier")
     rid = sess["restaurant_id"]
     doc = await rest_svc.require_restaurant_id(rid)
     enforce_table_limit(body.table, doc.get("subscription_tables"))
@@ -55,17 +56,18 @@ async def create_order(body: OrderCreate, sess=Depends(require_subscription)):
 @router.put("/{order_id}", response_model=Order)
 async def update_order(order_id: str, body: OrderUpdate, sess=Depends(require_manager_or_kitchen)):
     rid = sess["restaurant_id"]
-    from app.deps import has_active_subscription
-    if not await has_active_subscription(rid):
-        raise HTTPException(
-            status_code=402,
-            detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
-        )
     if body.status not in ALLOWED_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid order status.")
     existing = await db.orders.find_one({"id": order_id, "restaurant_id": rid}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="That order was not found.")
+    if not await has_active_subscription(rid):
+        # Expired restaurants may finish in-flight tickets; new work stays locked.
+        if existing.get("status") not in ("new", "cooking", "done", "delivered"):
+            raise HTTPException(
+                status_code=402,
+                detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
+            )
     if existing.get("status") == "cancelled" and body.status != "cancelled":
         raise HTTPException(status_code=400, detail="Cancelled orders cannot be reopened.")
     updates = {"status": body.status}
@@ -84,8 +86,9 @@ async def update_order(order_id: str, body: OrderUpdate, sess=Depends(require_ma
 
 
 @router.post("/{order_id}/settle")
-async def settle_order(order_id: str, body: SettleBody, sess=Depends(require_subscription)):
+async def settle_order(order_id: str, body: SettleBody, sess=Depends(require_manager)):
     """Mark bill paid (cash/UPI/etc.) and optionally clear the table's open tickets."""
+    assert_role(sess, "owner", "manager", "cashier")
     rid = sess["restaurant_id"]
     mode = (body.payment_mode or "cash").lower().strip()
     if mode not in ("cash", "upi", "card", "other"):
@@ -95,6 +98,11 @@ async def settle_order(order_id: str, body: SettleBody, sess=Depends(require_sub
         raise HTTPException(status_code=404, detail="That order was not found.")
     if order.get("status") == "cancelled":
         raise HTTPException(status_code=400, detail="Cannot settle a cancelled order.")
+    if not await has_active_subscription(rid) and order.get("status") not in ("new", "cooking", "done", "delivered"):
+        raise HTTPException(
+            status_code=402,
+            detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one(
         {"id": order_id, "restaurant_id": rid},

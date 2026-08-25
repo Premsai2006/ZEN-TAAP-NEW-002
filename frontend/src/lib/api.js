@@ -13,7 +13,11 @@ api.interceptors.request.use((config) => {
     const admin = localStorage.getItem("admin_token");
     const mgr = localStorage.getItem("mgr_token");
     const kitchen = localStorage.getItem("kitchen_token");
-    const t = path.startsWith("/admin") ? admin : (mgr || kitchen);
+    const t = path.startsWith("/admin")
+      ? admin
+      : path.startsWith("/kitchen")
+        ? (kitchen || mgr)
+        : (mgr || kitchen);
     if (t) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${t}`;
@@ -42,8 +46,16 @@ api.interceptors.response.use(
           _redirecting = true;
           localStorage.removeItem("mgr_token");
           localStorage.removeItem("mgr_authed");
+          localStorage.removeItem("mgr_role");
           toast.error("Session expired — please log in again.");
           setTimeout(() => { _redirecting = false; window.location.assign("/login"); }, 600);
+        }
+      } else if (path.startsWith("/kitchen")) {
+        if (!_redirecting) {
+          _redirecting = true;
+          localStorage.removeItem("kitchen_token");
+          toast.error("Kitchen session expired — please enter the PIN again.");
+          setTimeout(() => { _redirecting = false; window.location.assign(path); }, 600);
         }
       }
     }
@@ -52,14 +64,6 @@ api.interceptors.response.use(
         duration: 5000,
         id: "sub-required",
       });
-      // Soft redirect — give the user time to read the toast (issue #3)
-      if (typeof window !== "undefined" && !_redirecting) {
-        const path = window.location.pathname;
-        if (path.startsWith("/manager")) {
-          _redirecting = true;
-          setTimeout(() => { _redirecting = false; window.location.assign("/subscribe"); }, 2200);
-        }
-      }
     }
     if (status === 429) {
       toast.error(friendlyError(err, "Too many attempts. Please wait and try again."), {

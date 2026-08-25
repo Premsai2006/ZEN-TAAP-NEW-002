@@ -69,7 +69,12 @@ export const GrowthPill = ({ pct, label = "vs prev 7d" }) => {
   );
 };
 
-export default function OrdersSection({ orders, stats, settings, showRevenue, setShowRevenue, onRefresh, locked, menu = [] }) {
+export default function OrdersSection({
+  orders, stats, settings, showRevenue, setShowRevenue, onRefresh,
+  locked, createLocked, statusLocked, menu = [],
+}) {
+  const noCreate = createLocked ?? locked;
+  const noStatus = statusLocked ?? locked;
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
@@ -81,7 +86,7 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
   const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
 
   const updateOrder = async (id, status) => {
-    if (locked) {
+    if (noStatus) {
       toast.error("Subscribe to ZenTaap to update orders.");
       return;
     }
@@ -96,10 +101,15 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
   };
 
   const placeWalkIn = async () => {
-    if (locked) return toast.error("Subscribe to ZenTaap to place orders.");
+    if (noCreate) return toast.error("Subscribe to ZenTaap to place orders.");
     const items = Object.values(wiCart)
       .filter((x) => x.qty > 0)
-      .map(({ item, qty }) => ({ name: item.name, qty, price: item.price }));
+      .map(({ item, qty }) => ({
+        name: item.name,
+        qty,
+        price: item.price,
+        menu_item_id: item.id,
+      }));
     if (!items.length) return toast.error("Add at least one item.");
     setWiPlacing(true);
     try {
@@ -195,9 +205,9 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
               type="button"
               className="mini-btn primary"
               data-testid="walk-in-order-btn"
-              disabled={locked}
+              disabled={noCreate}
               onClick={() => {
-                if (locked) return toast.error("Subscribe to ZenTaap to place orders.");
+                if (noCreate) return toast.error("Subscribe to ZenTaap to place orders.");
                 setWalkInOpen(true);
               }}
             >
@@ -262,7 +272,7 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                             className="mini-btn"
                             onClick={() => updateOrder(o.id, nxt)}
                             data-testid={`order-update-${o.order_number}`}
-                            disabled={locked}
+                            disabled={noStatus}
                           >
                             → {nxt}
                           </button>
@@ -273,12 +283,12 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                           <button
                             className="mini-btn"
                             onClick={() => {
-                              if (locked) return toast.error("Subscribe to ZenTaap to manage orders.");
+                              if (noStatus) return toast.error("Subscribe to ZenTaap to manage orders.");
                               if (!window.confirm(`Cancel order #${o.order_number}?`)) return;
                               updateOrder(o.id, "cancelled");
                             }}
                             data-testid={`order-cancel-${o.order_number}`}
-                            disabled={locked}
+                            disabled={noStatus}
                             title="Cancel / void"
                             style={{ color: "var(--red)" }}
                           >
@@ -288,15 +298,15 @@ export default function OrdersSection({ orders, stats, settings, showRevenue, se
                         <button
                           className="mini-btn primary"
                           onClick={() => {
-                            if (locked) {
+                            if (noStatus) {
                               toast.error("Subscribe to ZenTaap to generate bills.");
                               return;
                             }
                             setBillOrder(o);
                           }}
                           data-testid={`generate-bill-${o.order_number}`}
-                          title={locked ? "Requires subscription" : "Generate Bill"}
-                          disabled={locked || o.status === "cancelled"}
+                          title={noStatus ? "Requires subscription" : "Generate Bill"}
+                          disabled={noStatus || o.status === "cancelled"}
                         >
                           <Receipt size={12} style={{ display: "inline", marginRight: 4 }} />
                           Bill

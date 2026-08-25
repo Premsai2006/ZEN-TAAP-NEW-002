@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from math import ceil
 from typing import Optional
+import time
 
 from fastapi import HTTPException
 
@@ -16,6 +17,8 @@ _cache = {
     "updated_at": None,
     "updated_by": "",
 }
+_loaded_at = 0.0
+_CACHE_TTL = 2.0
 
 
 def get_pricing_config() -> dict:
@@ -226,8 +229,11 @@ def compute_upgrade_proration(
     }
 
 
-async def hydrate_pricing():
+async def hydrate_pricing(force: bool = False):
     """Load admin-configured pricing from Mongo, or persist current defaults."""
+    global _loaded_at
+    if not force and _loaded_at and (time.monotonic() - _loaded_at) < _CACHE_TTL:
+        return get_pricing_config()
     from app.database import db
 
     defaults = {
@@ -244,8 +250,12 @@ async def hydrate_pricing():
             **defaults,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
-        return apply_pricing_cache(defaults)
-    return apply_pricing_cache(doc)
+        apply_pricing_cache(defaults)
+        _loaded_at = time.monotonic()
+        return get_pricing_config()
+    apply_pricing_cache(doc)
+    _loaded_at = time.monotonic()
+    return get_pricing_config()
 
 
 async def save_pricing(fields: dict, updated_by: str = "") -> dict:
@@ -262,4 +272,6 @@ async def save_pricing(fields: dict, updated_by: str = "") -> dict:
         "updated_by": updated_by or "",
     }
     await db.app_config.update_one({"key": "pricing"}, {"$set": payload}, upsert=True)
+    global _loaded_at
+    _loaded_at = time.monotonic()
     return apply_pricing_cache(payload)

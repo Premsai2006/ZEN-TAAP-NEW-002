@@ -17,7 +17,12 @@ RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "")
 
-# OTP via Gmail SMTP (Google App Password)
+# OTP SMS via 2Factor.in — set TWOFACTOR_API_KEY in .env
+TWOFACTOR_API_KEY = (os.environ.get("TWOFACTOR_API_KEY") or "").strip()
+TWOFACTOR_OTP_TEMPLATE = (os.environ.get("TWOFACTOR_OTP_TEMPLATE") or "").strip()
+TWOFACTOR_COUNTRY_CODE = (os.environ.get("TWOFACTOR_COUNTRY_CODE") or "91").strip() or "91"
+
+# OTP email via Gmail SMTP (Google App Password) — fallback if SMS is not configured
 # SMTP_USER=you@gmail.com
 # SMTP_PASSWORD=xxxx xxxx xxxx xxxx   # 16-char App Password
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")

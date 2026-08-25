@@ -70,12 +70,14 @@ async def get_by_phone(contact: str) -> Optional[dict]:
     key = phone_key(contact)
     if len(key) < 7:
         return None
-    # Match last 7+ digits stored
+    doc = await db.restaurants.find_one({"phone_key": key}, {"_id": 0})
+    if doc:
+        return doc
     cursor = db.restaurants.find({}, {"_id": 0})
-    async for doc in cursor:
-        saved = phone_key(doc.get("contact_number") or doc.get("phone") or "")
-        if saved and (saved == key or saved[-7:] == key[-7:]):
-            return doc
+    async for row in cursor:
+        saved = phone_key(row.get("contact_number") or row.get("phone") or "")
+        if saved and saved == key:
+            return row
     return None
 
 
@@ -109,6 +111,9 @@ async def ensure_indexes():
         await db.categories.create_index([("restaurant_id", 1), ("id", 1)])
         await db.orders.create_index([("restaurant_id", 1), ("order_number", -1)])
         await db.sessions.create_index([("restaurant_id", 1), ("scope", 1), ("device_id", 1)])
+        await db.staff.create_index([("restaurant_id", 1), ("id", 1)])
+        await db.admin_audit.create_index("created_at")
+        await db.payments.create_index("payment_id", sparse=True)
         await db.restaurants.create_index("razorpay_subscription_id", sparse=True)
         await db.razorpay_plans.create_index("tables", unique=True)
     except Exception as e:

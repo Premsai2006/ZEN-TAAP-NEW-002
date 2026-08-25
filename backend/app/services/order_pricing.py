@@ -7,20 +7,35 @@ from app.database import db
 
 
 async def reprice_items(restaurant_id: str, items) -> Tuple[list, float]:
-    """Rebuild line items using menu prices; reject unknown / unavailable dishes."""
+    """Rebuild line items using menu prices; prefer menu_item_id, fall back to unique name."""
     if not items:
         raise HTTPException(status_code=400, detail="Add at least one item to the order.")
 
+    ids = [getattr(i, "menu_item_id", None) or "" for i in items]
+    ids = [i for i in ids if i]
     names = [i.name for i in items]
     menu = await db.menu_items.find(
-        {"restaurant_id": restaurant_id, "name": {"$in": names}},
+        {"restaurant_id": restaurant_id, "$or": [{"id": {"$in": ids or ["__none__"]}}, {"name": {"$in": names}}]},
         {"_id": 0, "id": 1, "name": 1, "price": 1, "available": 1},
     ).to_list(500)
-    by_name = {m["name"]: m for m in menu}
+    by_id = {m["id"]: m for m in menu if m.get("id")}
+    by_name = {}
+    for m in menu:
+        by_name.setdefault(m["name"], []).append(m)
 
     priced = []
     for line in items:
-        m = by_name.get(line.name)
+        mid = getattr(line, "menu_item_id", None) or ""
+        m = by_id.get(mid) if mid else None
+        if not m:
+            matches = by_name.get(line.name) or []
+            if len(matches) == 1:
+                m = matches[0]
+            elif len(matches) > 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{line.name}' appears more than once on the menu. Refresh and try again.",
+                )
         if not m:
             raise HTTPException(
                 status_code=400,
@@ -29,13 +44,18 @@ async def reprice_items(restaurant_id: str, items) -> Tuple[list, float]:
         if m.get("available") is False:
             raise HTTPException(
                 status_code=400,
-                detail=f"'{line.name}' is not available right now.",
+                detail=f"'{m.get('name') or line.name}' is not available right now.",
             )
         qty = int(line.qty or 0)
         if qty < 1:
             raise HTTPException(status_code=400, detail="Item quantity must be at least 1.")
         price = float(m["price"])
-        priced.append({"name": m["name"], "qty": qty, "price": price})
+        priced.append({
+            "name": m["name"],
+            "qty": qty,
+            "price": price,
+            "menu_item_id": m.get("id"),
+        })
 
     amount = sum(i["qty"] * i["price"] for i in priced)
     return priced, float(amount)

@@ -1,13 +1,11 @@
 """PIN hashing helpers — bcrypt with plaintext migration."""
 from __future__ import annotations
 
-from passlib.context import CryptContext
-
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
 
 
 def hash_pin(pin: str) -> str:
-    return _pwd.hash(pin)
+    return bcrypt.hashpw((pin or "").encode("utf-8")[:72], bcrypt.gensalt()).decode()
 
 
 def looks_hashed(value: str | None) -> bool:
@@ -21,10 +19,10 @@ def verify_pin(plain: str, stored: str | None) -> bool:
         return False
     if looks_hashed(stored):
         try:
-            return _pwd.verify(plain, stored)
+            return bcrypt.checkpw(plain.encode("utf-8")[:72], stored.encode("utf-8"))
         except Exception:
             return False
-    # Legacy plaintext — constant-time-ish compare
+    # Legacy plaintext
     return plain == stored
 
 

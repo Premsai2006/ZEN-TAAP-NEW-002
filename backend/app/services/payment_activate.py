@@ -68,6 +68,22 @@ async def activate_paid_subscription(
     payment_kind: str = "subscription",
 ) -> dict:
     """Mark restaurant active after verified payment. Optionally keep existing cycle end."""
+    if payment_id:
+        already = await db.payments.find_one(
+            {"payment_id": payment_id, "restaurant_id": restaurant_id},
+            {"_id": 0},
+        )
+        if already:
+            doc = await rest_svc.require_restaurant_id(restaurant_id)
+            return {
+                **doc,
+                "idempotent": True,
+                "payment_kind": already.get("kind") or payment_kind,
+                "preserve_cycle": preserve_cycle,
+            }
+
+    from app.services.pricing import hydrate_pricing
+    await hydrate_pricing()
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     now = datetime.now(timezone.utc)
 

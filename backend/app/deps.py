@@ -58,6 +58,29 @@ def clear_admin_cookie(response: Response) -> None:
     response.delete_cookie(key=ADM_COOKIE, path="/")
 
 
+async def _reject_if_suspended(restaurant_id: str):
+    if not restaurant_id:
+        return
+    rest = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "suspended": 1})
+    if rest and rest.get("suspended"):
+        raise HTTPException(
+            status_code=403,
+            detail="This restaurant is suspended. Contact ZenTaap support.",
+        )
+
+
+def require_roles(*roles: str):
+    allowed = {r.lower() for r in roles}
+
+    async def _inner(sess: dict = Depends(require_manager)):
+        role = (sess.get("role") or "owner").lower()
+        if role not in allowed:
+            raise HTTPException(status_code=403, detail="You don't have permission for this.")
+        return sess
+
+    return _inner
+
+
 async def require_admin(request: Request):
     token = extract_admin_token(request)
     if not token:
@@ -81,10 +104,12 @@ async def require_manager(request: Request):
         raise HTTPException(status_code=401, detail="Session expired — please log in again.")
     if not sess.get("restaurant_id"):
         raise HTTPException(status_code=401, detail="Session expired — please log in again.")
+    await _reject_if_suspended(sess["restaurant_id"])
     await db.sessions.update_one(
         {"_id": sess["_id"]},
         {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},
     )
+    sess.setdefault("role", "owner")
     return sess
 
 
@@ -101,16 +126,20 @@ async def require_manager_or_kitchen(request: Request):
     )
     if not sess or not sess.get("restaurant_id"):
         raise HTTPException(status_code=401, detail="Session expired — please log in again.")
+    await _reject_if_suspended(sess["restaurant_id"])
     await db.sessions.update_one(
         {"_id": sess["_id"]},
         {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},
     )
+    sess.setdefault("role", "kitchen" if sess.get("scope") == "kitchen" else "owner")
     return sess
 
 
 async def has_active_subscription(restaurant_id: str) -> bool:
     """Enforce trial_end + billing cycle (with short grace) on every gate check."""
-    _doc, status = await refresh_subscription_status(restaurant_id)
+    doc, status = await refresh_subscription_status(restaurant_id)
+    if doc.get("suspended"):
+        return False
     return has_access_status(status)
 
 
@@ -126,6 +155,12 @@ async def require_subscription(sess: dict = Depends(require_manager)):
 
 async def require_manager_subscription(sess: dict = Depends(require_manager)):
     return await require_subscription(sess)
+
+
+def assert_role(sess: dict, *roles: str) -> None:
+    role = (sess.get("role") or "owner").lower()
+    if role not in {r.lower() for r in roles}:
+        raise HTTPException(status_code=403, detail="You don't have permission for this.")
 
 
 RequireManager = Depends(require_manager)

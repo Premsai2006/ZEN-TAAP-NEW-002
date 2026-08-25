@@ -94,6 +94,8 @@ async def register_session(
     device_label: Optional[str],
     *,
     scope: str = "manager",
+    staff_id: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> dict:
     now_iso = datetime.now(timezone.utc).isoformat()
     prefix = "mgr" if scope == "manager" else scope
@@ -101,6 +103,8 @@ async def register_session(
     if not device_id:
         device_id = uuid.uuid4().hex[:16]
     label = (device_label or "Unknown device")[:80]
+    role = role or ("kitchen" if scope == "kitchen" else "owner")
+    extra = {"role": role, "staff_id": staff_id}
 
     existing = await db.sessions.find(
         {"restaurant_id": restaurant_id, "scope": scope, "device_id": device_id}
@@ -123,6 +127,7 @@ async def register_session(
                 "last_used": now_iso,
                 "device_label": label,
                 "device_id": device_id,
+                **extra,
             }},
         )
     else:
@@ -159,6 +164,7 @@ async def register_session(
             "token": token,
             "created_at": now_iso,
             "last_used": now_iso,
+            **extra,
         })
 
     all_sess = await db.sessions.find(
@@ -171,6 +177,8 @@ async def register_session(
         "device_id": device_id,
         "active_devices": active,
         "restaurant_id": restaurant_id,
+        "role": role,
+        "staff_id": staff_id,
     }
 
 

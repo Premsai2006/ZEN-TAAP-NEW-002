@@ -35,6 +35,9 @@ export default function Manager() {
   const [stats, setStats] = useState(null);
   const [settings, setSettings] = useState(null);
   const [subscription, setSubscription] = useState(null);
+  const [role, setRole] = useState(() => {
+    try { return localStorage.getItem("mgr_role") || "owner"; } catch { return "owner"; }
+  });
   const [restaurantSlug, setRestaurantSlug] = useState(() => {
     try { return localStorage.getItem("mgr_slug") || ""; } catch { return ""; }
   });
@@ -64,7 +67,7 @@ export default function Manager() {
         }
         return;
       }
-      const hasAccess = !subscription || ["trial", "active"].includes(subscription.status);
+      const hasAccess = ["trial", "active"].includes(subscription?.status);
       // allSettled so a 402 on gated stats doesn't blank the dashboard (issue #7)
       const results = await Promise.allSettled([
         api.get("/orders"),
@@ -97,6 +100,25 @@ export default function Manager() {
     refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    api.get("/auth/me")
+      .then(({ data }) => {
+        const r = (data?.role || "owner").toLowerCase();
+        setRole(r);
+        try { localStorage.setItem("mgr_role", r); } catch { /* ignore */ }
+        if (data?.slug) {
+          setRestaurantSlug(data.slug);
+          try { localStorage.setItem("mgr_slug", data.slug); } catch { /* ignore */ }
+        }
+        if (r === "kitchen") {
+          const slug = data?.slug || restaurantSlug;
+          navigate(slug ? `/kitchen/${slug}` : "/kitchen", { replace: true });
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
+
   // Fast poll only on live ops tabs; slower elsewhere; none on settings/profile
   const pollMs = LIVE_TABS.has(active) ? 2000 : (active === "sales" || active === "menu" ? 15000 : null);
   useInterval(refresh, pollMs);
@@ -125,23 +147,25 @@ export default function Manager() {
     }
     localStorage.removeItem("mgr_token");
     localStorage.removeItem("mgr_authed");
+    localStorage.removeItem("mgr_role");
     navigate("/login");
   };
 
-  const activeNav = NAV.find((n) => n.key === active);
+  const cashier = role === "cashier";
+  const canSubscribe = role === "owner" || role === "manager";
+  const visibleNav = cashier ? NAV.filter((n) => n.key === "orders" || n.key === "tables") : NAV;
+  const activeNav = visibleNav.find((n) => n.key === active) || visibleNav[0];
   const subStatus = subscription?.status;
   const locked = subscription && !["trial", "active"].includes(subStatus);
+  const expired = subStatus === "expired";
+  const createLocked = Boolean(locked);
+  const statusLocked = Boolean(locked) && !expired;
 
   useEffect(() => {
-    // Expired: allow Tables (blurred QRs + pay to unlock), Profile, Settings.
-    // Other tabs still bounce to Subscribe so they renew first.
-    if (
-      subscription?.status === "expired" &&
-      !["profile", "settings", "tables"].includes(active)
-    ) {
-      navigate("/subscribe", { replace: true });
+    if (cashier && !["orders", "tables"].includes(active)) {
+      setActive("orders");
     }
-  }, [subscription?.status, active, navigate]);
+  }, [cashier, active]);
 
   const [mobileNav, setMobileNav] = useState(false);
 
@@ -165,9 +189,10 @@ export default function Manager() {
           </div>
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-          {NAV.map((n) => {
+          {visibleNav.map((n) => {
             const Icon = n.icon;
-            const isLocked = locked && n.needsSub;
+            const liveWhenExpired = expired && (n.key === "orders" || n.key === "tables");
+            const isLocked = locked && n.needsSub && !liveWhenExpired;
             return (
               <div
                 key={n.key}
@@ -191,6 +216,7 @@ export default function Manager() {
               </div>
             );
           })}
+          {canSubscribe && (
           <div
             className="nav-link"
             onClick={() => { navigate("/subscribe"); setMobileNav(false); }}
@@ -200,6 +226,7 @@ export default function Manager() {
             <CreditCard size={16} className="icon" />
             <span>Subscription</span>
           </div>
+          )}
         </nav>
 
         <div
@@ -244,11 +271,21 @@ export default function Manager() {
                   </>
                 )}
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }} data-testid="feature-lock-matrix">
-                  <b>Blocked without subscription:</b> placing/updating orders, generating bills, adding/editing menu items &amp; categories, sales analytics, and downloading clear table QRs.
-                  {" "}Profile &amp; Settings stay available. Tables show blurred QRs — pay to unlock.
+                  {subscription.status === "expired" ? (
+                    <>
+                      Finish tickets already in the kitchen, then bill and settle them.
+                      New QR and walk-in orders stay blocked until you renew. Menu edits, sales, and downloadable table QRs stay locked.
+                    </>
+                  ) : (
+                    <>
+                      <b>Blocked without subscription:</b> placing/updating orders, generating bills, adding/editing menu items &amp; categories, sales analytics, and downloading clear table QRs.
+                      {" "}Profile &amp; Settings stay available. Tables show blurred QRs — pay to unlock.
+                    </>
+                  )}
                 </div>
               </div>
             </div>
+            {canSubscribe && (
             <button
               type="button"
               className="explore-banner-cta"
@@ -257,6 +294,7 @@ export default function Manager() {
             >
               {subscription.status === "expired" ? "Pay & Resume" : "Start Free Trial"} <ArrowRight size={14} />
             </button>
+            )}
           </div>
         )}
 
@@ -269,6 +307,8 @@ export default function Manager() {
             setShowRevenue={setShowRevenuePersist}
             onRefresh={refresh}
             locked={locked}
+            createLocked={createLocked}
+            statusLocked={statusLocked}
             menu={menu}
           />
         )}
@@ -299,7 +339,7 @@ export default function Manager() {
           />
         )}
         {active === "profile" && <ProfileSection onRefresh={refresh} />}
-        {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} />}
+        {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} role={role} />}
       </div>
 
       <LogoutDialog

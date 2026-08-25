@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from app.deps import require_manager
+from app.deps import require_manager, assert_role
 from app.models import RestaurantSettings, SettingsUpdate
 from app.services import restaurants as rest_svc
 
@@ -14,6 +14,7 @@ async def get_settings(sess=Depends(require_manager)):
 
 @router.put("", response_model=RestaurantSettings)
 async def update_settings(body: SettingsUpdate, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     update = body.model_dump(exclude_unset=True)
     if not update:

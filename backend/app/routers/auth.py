@@ -9,11 +9,14 @@ from app.deps import require_manager, extract_manager_token, set_manager_cookie,
 from app.models import (
     LoginRequest, SignupRequest, ChangePinRequest, RecoverPinRequest,
     RequestOtpBody, VerifyOtpBody, KitchenLoginBody, CustomerLoginBody,
+    SignupOtpBody, StaffCreateBody, StaffActiveBody, StaffPinBody,
 )
 from app.services import auth_service as auth
 from app.services import restaurants as rest_svc
+from app.services import staff as staff_svc
 from app.services.pins import hash_pin, verify_pin, needs_rehash
-from app.services.sms import send_otp_email, otp_delivery_configured
+from app.deps import require_manager, extract_manager_token, set_manager_cookie, clear_manager_cookie, assert_role
+from app.services.sms import deliver_pin_reset_otp, otp_delivery_configured, smtp_configured, twofactor_configured
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -27,6 +30,75 @@ async def auth_status():
         "multi_tenant": True,
         "restaurant_count": count,
     }
+
+
+@router.post("/signup/request-otp")
+async def signup_request_otp(body: SignupOtpBody):
+    digs = auth.digits(body.contact_number)
+    if len(digs) < 7:
+        raise HTTPException(status_code=400, detail="Please enter a valid phone number.")
+    phone_key = rest_svc.phone_key(body.contact_number)
+    if await rest_svc.get_by_phone(body.contact_number):
+        raise HTTPException(
+            status_code=400,
+            detail="An account with this phone number already exists. Please log in instead.",
+        )
+    to_email = (body.email or "").strip()
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+    sent_ok, channel, masked = False, "none", None
+    if otp_delivery_configured():
+        sent_ok, channel, masked = await deliver_pin_reset_otp(
+            phone_digits=digs,
+            email=to_email,
+            otp=otp,
+            restaurant_name="ZenTaap",
+        )
+    await db.otps.update_one(
+        {"key": f"signup:{phone_key}"},
+        {"$set": {
+            "otp": otp,
+            "phone_key": phone_key,
+            "email": to_email,
+            "expires_at": expires.isoformat(),
+            "channel": channel,
+        }},
+        upsert=True,
+    )
+    resp = {
+        "success": True,
+        "message": f"Code sent to {masked or 'your phone or email'}" if sent_ok else "Code generated.",
+        "channel": channel if sent_ok else "none",
+    }
+    if DEMO_MODE:
+        resp["demo_otp"] = otp
+        if not sent_ok:
+            resp["message"] = "Demo code generated. Use it to verify this phone number."
+        return resp
+    if not otp_delivery_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="OTP is not configured. Set TWOFACTOR_API_KEY or SMTP on the server.",
+        )
+    if not sent_ok:
+        raise HTTPException(status_code=502, detail="Could not send the OTP. Please try again.")
+    return resp
+
+
+async def _consume_signup_otp(contact: str, otp: str):
+    phone_key = rest_svc.phone_key(contact)
+    rec = await db.otps.find_one({"key": f"signup:{phone_key}"}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=400, detail="Please request a verification code first.")
+    try:
+        expires = datetime.fromisoformat(rec["expires_at"].replace("Z", "+00:00"))
+    except Exception:
+        expires = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if datetime.now(timezone.utc) > expires:
+        raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
+    if rec.get("otp") != (otp or "").strip():
+        raise HTTPException(status_code=401, detail="Incorrect OTP. Please try again.")
+    await db.otps.delete_one({"key": f"signup:{phone_key}"})
 
 
 @router.post("/signup")
@@ -53,6 +125,7 @@ async def signup(req: SignupRequest, request: Request, response: Response):
             status_code=400,
             detail="An account with this phone number already exists. Please log in instead.",
         )
+    await _consume_signup_otp(req.contact_number, req.otp)
 
     rid = str(uuid.uuid4())
     contact = req.contact_number.strip()
@@ -79,8 +152,9 @@ async def signup(req: SignupRequest, request: Request, response: Response):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.restaurants.insert_one(doc)
+    await staff_svc.ensure_owner(doc)
 
-    sess = await auth.register_session(rid, None, "Signup device")
+    sess = await auth.register_session(rid, None, "Signup device", role="owner")
     set_manager_cookie(response, sess["token"])
     return {
         "success": True,
@@ -90,6 +164,8 @@ async def signup(req: SignupRequest, request: Request, response: Response):
         "device_id": sess["device_id"],
         "active_devices": sess["active_devices"],
         "max_devices": MAX_DEVICES,
+        "role": "owner",
+        "landing": "manager",
     }
 
 
@@ -105,16 +181,31 @@ async def login(req: LoginRequest, request: Request, response: Response):
     if not restaurant or not restaurant.get("pin"):
         await auth.record_login_failure(request)
 
-    if not verify_pin(req.pin, restaurant.get("pin") if restaurant else None):
+    matched = await staff_svc.match_login(restaurant, req.pin)
+    if not matched:
         await auth.record_login_failure(request)
+    if restaurant.get("suspended"):
+        raise HTTPException(
+            status_code=403,
+            detail="This restaurant is suspended. Contact ZenTaap support.",
+        )
 
-    # Upgrade legacy plaintext PIN to bcrypt on successful login
-    if restaurant and needs_rehash(restaurant.get("pin")):
+    if matched["role"] == "owner" and needs_rehash(restaurant.get("pin")):
         await rest_svc.update_restaurant(restaurant["id"], {"pin": hash_pin(req.pin)})
 
     await auth.clear_login_failures(request)
-    sess = await auth.register_session(restaurant["id"], req.device_id, req.device_label)
-    set_manager_cookie(response, sess["token"])
+    landing = "kitchen" if matched["role"] == "kitchen" else "manager"
+    scope = "kitchen" if matched["role"] == "kitchen" else "manager"
+    sess = await auth.register_session(
+        restaurant["id"],
+        req.device_id,
+        req.device_label,
+        scope=scope,
+        staff_id=matched["staff_id"],
+        role=matched["role"],
+    )
+    if scope == "manager":
+        set_manager_cookie(response, sess["token"])
     return {
         "success": True,
         "token": sess["token"],
@@ -123,6 +214,9 @@ async def login(req: LoginRequest, request: Request, response: Response):
         "device_id": sess["device_id"],
         "active_devices": sess["active_devices"],
         "max_devices": MAX_DEVICES,
+        "role": matched["role"],
+        "staff_name": matched["name"],
+        "landing": landing,
     }
 
 
@@ -155,6 +249,7 @@ async def revoke_session(device_id: str, sess=Depends(require_manager)):
 
 @router.post("/change-pin")
 async def change_pin(req: ChangePinRequest, sess=Depends(require_manager)):
+    assert_role(sess, "owner")
     restaurant = await rest_svc.require_restaurant_id(sess["restaurant_id"])
     if not verify_pin(req.old_pin, restaurant.get("pin")):
         raise HTTPException(status_code=401, detail="Current PIN is incorrect. Please try again.")
@@ -178,11 +273,11 @@ async def request_otp(body: RequestOtpBody):
         raise HTTPException(status_code=404, detail="No phone number is saved on this account.")
     saved = auth.digits(restaurant.get("contact_number"))
     given = auth.digits(body.contact_number)
-    if not saved or saved[-7:] != given[-7:]:
+    if rest_svc.phone_key(saved) != rest_svc.phone_key(given):
         raise HTTPException(status_code=401, detail="That phone number does not match our records.")
 
     to_email = (restaurant.get("email") or "").strip()
-    if not to_email or "@" not in to_email:
+    if not twofactor_configured() and smtp_configured() and (not to_email or "@" not in to_email):
         raise HTTPException(
             status_code=400,
             detail="No email is saved on this account. Add an email in Profile, then try Forgot PIN again.",
@@ -190,6 +285,16 @@ async def request_otp(body: RequestOtpBody):
 
     otp = f"{secrets.randbelow(1_000_000):06d}"
     expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    sent_ok, channel, masked = False, "none", None
+    if otp_delivery_configured():
+        sent_ok, channel, masked = await deliver_pin_reset_otp(
+            phone_digits=saved,
+            email=to_email,
+            otp=otp,
+            restaurant_name=restaurant.get("restaurant_name") or "",
+        )
+
     await db.otps.update_one(
         {"key": f"pin_reset:{restaurant['id']}"},
         {"$set": {
@@ -197,39 +302,41 @@ async def request_otp(body: RequestOtpBody):
             "restaurant_id": restaurant["id"],
             "contact_last7": saved[-7:],
             "expires_at": expires.isoformat(),
-            "channel": "email",
-            "email": to_email,
+            "channel": channel,
+            "email": to_email if channel == "email" else "",
+            "phone": saved[-10:] if channel == "sms" else "",
         }},
         upsert=True,
     )
 
-    # Mask email for UI: j***@gmail.com
-    local, _, domain = to_email.partition("@")
-    masked = f"{local[:1]}***@{domain}" if local and domain else "your email"
+    if channel == "sms":
+        dest_msg = f"Code sent to {masked or 'your phone'}"
+    elif channel == "email":
+        dest_msg = f"Code sent to {masked or 'your email'}"
+    else:
+        dest_msg = "Code generated."
 
-    sent_ok, _detail = await send_otp_email(
-        to_email,
-        otp,
-        restaurant_name=restaurant.get("restaurant_name") or "",
-    )
     resp = {
         "success": True,
-        "message": f"Code sent to {masked}",
-        "channel": "email",
-        "email_delivered": bool(sent_ok),
+        "message": dest_msg,
+        "channel": channel if sent_ok else "none",
+        "sms_delivered": bool(sent_ok and channel == "sms"),
+        "email_delivered": bool(sent_ok and channel == "email"),
     }
     if DEMO_MODE:
         resp["demo_otp"] = otp
+        if not sent_ok:
+            resp["message"] = "Demo code generated. Add TWOFACTOR_API_KEY to send a real SMS."
         return resp
     if not otp_delivery_configured():
         raise HTTPException(
             status_code=503,
-            detail="Email OTP is not configured. Set SMTP_USER and SMTP_PASSWORD (Gmail App Password) on the server.",
+            detail="OTP SMS is not configured. Set TWOFACTOR_API_KEY on the server.",
         )
     if not sent_ok:
         raise HTTPException(
             status_code=502,
-            detail="Could not send the OTP email. Check SMTP settings and try again.",
+            detail="Could not send the OTP. Check TWOFACTOR_API_KEY (and DLT template if required) and try again.",
         )
     return resp
 
@@ -248,7 +355,9 @@ async def verify_otp(body: VerifyOtpBody):
         expires = datetime.now(timezone.utc) - timedelta(seconds=1)
     if datetime.now(timezone.utc) > expires:
         raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
-    if rec.get("contact_last7") != auth.digits(body.contact_number)[-7:]:
+    if rec.get("phone_key") and rec.get("phone_key") != rest_svc.phone_key(body.contact_number):
+        raise HTTPException(status_code=401, detail="That phone number does not match our records.")
+    elif rec.get("contact_last7") and rec.get("contact_last7") != auth.digits(body.contact_number)[-7:]:
         raise HTTPException(status_code=401, detail="That phone number does not match our records.")
     if rec.get("otp") != body.otp.strip():
         raise HTTPException(status_code=401, detail="Incorrect OTP. Please try again.")
@@ -263,22 +372,92 @@ async def kitchen_login(body: KitchenLoginBody):
     if not body.slug:
         raise HTTPException(status_code=400, detail="Please open the kitchen page for your restaurant.")
     restaurant = await rest_svc.require_by_slug(body.slug)
+    if restaurant.get("suspended"):
+        raise HTTPException(
+            status_code=403,
+            detail="This restaurant is suspended. Contact ZenTaap support.",
+        )
     expected = restaurant.get("kitchen_pin") or ""
-    if not expected:
-        raise HTTPException(status_code=404, detail="Kitchen PIN is not set yet. Ask your manager to set one up.")
-    if not verify_pin(body.pin, expected):
-        raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN. Please try again.")
-    if needs_rehash(expected):
-        await rest_svc.update_restaurant(restaurant["id"], {"kitchen_pin": hash_pin(body.pin)})
+    staff_rec = None
+    if expected and verify_pin(body.pin, expected):
+        if needs_rehash(expected):
+            await rest_svc.update_restaurant(restaurant["id"], {"kitchen_pin": hash_pin(body.pin)})
+    else:
+        staff_rec = await staff_svc.match_kitchen_staff(restaurant["id"], body.pin)
+        if not staff_rec:
+            has_staff = await db.staff.find_one(
+                {"restaurant_id": restaurant["id"], "role": "kitchen", "active": True},
+                {"_id": 1},
+            )
+            if not expected and not has_staff:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Kitchen PIN is not set yet. Ask your manager to set one up.",
+                )
+            raise HTTPException(status_code=401, detail="Incorrect Kitchen PIN. Please try again.")
     sess = await auth.register_session(
-        restaurant["id"], None, "Kitchen display", scope="kitchen"
+        restaurant["id"],
+        None,
+        (staff_rec.get("name") if staff_rec else None) or "Kitchen display",
+        scope="kitchen",
+        staff_id=staff_rec["id"] if staff_rec else None,
+        role="kitchen",
     )
     return {
         "success": True,
         "token": sess["token"],
         "restaurant_id": restaurant["id"],
         "slug": restaurant.get("slug"),
+        "role": "kitchen",
+        "landing": "kitchen",
     }
+
+
+@router.get("/me")
+async def auth_me(sess=Depends(require_manager)):
+    doc = await rest_svc.require_restaurant_id(sess["restaurant_id"])
+    role = sess.get("role") or "owner"
+    staff_name = doc.get("manager_name") or "Owner"
+    if sess.get("staff_id"):
+        rec = await db.staff.find_one({"id": sess["staff_id"]}, {"_id": 0, "name": 1})
+        if rec and rec.get("name"):
+            staff_name = rec["name"]
+    return {
+        "restaurant_id": sess["restaurant_id"],
+        "slug": doc.get("slug") or "",
+        "role": role,
+        "staff_id": sess.get("staff_id") or "",
+        "staff_name": staff_name,
+        "restaurant_name": doc.get("restaurant_name") or "",
+        "suspended": bool(doc.get("suspended")),
+    }
+
+
+@router.get("/staff")
+async def list_staff(sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
+    await staff_svc.ensure_owner(await rest_svc.require_restaurant_id(sess["restaurant_id"]))
+    return {"staff": await staff_svc.list_staff(sess["restaurant_id"])}
+
+
+@router.post("/staff")
+async def create_staff(body: StaffCreateBody, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
+    return await staff_svc.create_staff(
+        sess["restaurant_id"], name=body.name, role=body.role, pin=body.pin,
+    )
+
+
+@router.put("/staff/{staff_id}/active")
+async def set_staff_active(staff_id: str, body: StaffActiveBody, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
+    return await staff_svc.set_staff_active(sess["restaurant_id"], staff_id, body.active)
+
+
+@router.put("/staff/{staff_id}/pin")
+async def reset_staff_pin(staff_id: str, body: StaffPinBody, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
+    return await staff_svc.reset_staff_pin(sess["restaurant_id"], staff_id, body.pin)
 
 
 @router.post("/customer-login")

@@ -21,6 +21,8 @@ async def list_menu(sess=Depends(require_manager)):
 
 @router.post("", response_model=MenuItem)
 async def create_menu(body: MenuItemCreate, sess=Depends(require_subscription)):
+    from app.deps import assert_role
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     payload = body.model_dump()
     if payload.get("images") is None:
@@ -34,6 +36,8 @@ async def create_menu(body: MenuItemCreate, sess=Depends(require_subscription)):
 
 @router.put("/{item_id}", response_model=MenuItem)
 async def update_menu(item_id: str, body: MenuItemUpdate, sess=Depends(require_subscription)):
+    from app.deps import assert_role
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
@@ -53,6 +57,8 @@ async def update_menu(item_id: str, body: MenuItemUpdate, sess=Depends(require_s
 
 @router.delete("/{item_id}")
 async def delete_menu(item_id: str, sess=Depends(require_subscription)):
+    from app.deps import assert_role
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     res = await db.menu_items.delete_one({"id": item_id, "restaurant_id": rid})
     if res.deleted_count == 0:

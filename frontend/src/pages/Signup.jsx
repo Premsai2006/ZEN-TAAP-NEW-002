@@ -65,14 +65,16 @@ export default function Signup() {
     pin: "",
     confirm_pin: "",
   });
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
   const [slugTouched, setSlugTouched] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const sendOtp = async () => {
     if (!form.manager_name.trim()) return toast.error("Please enter the manager's name.");
     if (!form.restaurant_name.trim()) return toast.error("Please enter your restaurant name.");
     const slug = slugify(form.slug || form.restaurant_name);
@@ -83,6 +85,33 @@ export default function Signup() {
     if (digits.length < 7) return toast.error("Please enter a valid phone number.");
     if (form.pin.length < 6) return toast.error("Your PIN needs to be at least 6 digits.");
     if (form.pin !== form.confirm_pin) return toast.error("Your PINs don't match — please try again.");
+    setOtpSending(true);
+    try {
+      const { data } = await api.post("/auth/signup/request-otp", {
+        contact_number: form.contact_number.trim(),
+        email: form.email.trim() || undefined,
+      });
+      setOtpSent(true);
+      if (data.demo_otp) {
+        toast.success(`Demo OTP: ${data.demo_otp}`, { duration: 10000 });
+      } else {
+        toast.success(data.message || "Verification code sent.");
+      }
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't send the verification code. Please try again."));
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!otpSent) {
+      await sendOtp();
+      return;
+    }
+    if ((otp || "").trim().length < 4) return toast.error("Enter the verification code we sent you.");
+    const slug = slugify(form.slug || form.restaurant_name);
     setLoading(true);
     try {
       const { data } = await api.post("/auth/signup", {
@@ -92,8 +121,10 @@ export default function Signup() {
         contact_number: form.contact_number.trim(),
         email: form.email.trim(),
         pin: form.pin,
+        otp: otp.trim(),
       });
       localStorage.setItem("mgr_token", data.token);
+      localStorage.setItem("mgr_role", data.role || "owner");
       if (data.slug) localStorage.setItem("mgr_slug", data.slug);
       if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       toast.success("Account created — next, choose your plan.");
@@ -119,7 +150,7 @@ export default function Signup() {
           Create your account
         </div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22, textAlign: "center" }}>
-          Register your restaurant — each venue gets its own login and menu.
+          Register your restaurant — we will verify your phone (or email) before creating the account.
         </div>
 
         <div className="form-group" style={{ marginBottom: 12 }}>
@@ -182,7 +213,11 @@ export default function Signup() {
             type="tel"
             inputMode="tel"
             value={form.contact_number}
-            onChange={(e) => set("contact_number", e.target.value)}
+            onChange={(e) => {
+              setOtpSent(false);
+              setOtp("");
+              set("contact_number", e.target.value);
+            }}
             placeholder="+91 …"
             data-testid="signup-contact-number"
           />
@@ -196,7 +231,10 @@ export default function Signup() {
           <input
             type="email"
             value={form.email}
-            onChange={(e) => set("email", e.target.value)}
+            onChange={(e) => {
+              setOtpSent(false);
+              set("email", e.target.value);
+            }}
             placeholder="you@restaurant.com"
             data-testid="signup-email"
           />
@@ -213,14 +251,41 @@ export default function Signup() {
           </div>
         </div>
 
+        {otpSent && (
+          <div className="form-group" style={{ marginTop: 14 }}>
+            <label className="form-label">Verification code</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              placeholder="6-digit code"
+              maxLength={6}
+              autoFocus
+              data-testid="signup-otp"
+              style={{ letterSpacing: 6, textAlign: "center", fontSize: 18 }}
+            />
+            <button
+              type="button"
+              className="link-btn"
+              onClick={sendOtp}
+              disabled={otpSending}
+              style={{ marginTop: 8, fontSize: 13 }}
+              data-testid="signup-resend-otp"
+            >
+              {otpSending ? "Sending…" : "Resend code"}
+            </button>
+          </div>
+        )}
+
         <button
           type="submit"
           className="submit-btn"
-          disabled={loading}
+          disabled={loading || otpSending}
           data-testid="signup-submit-btn"
           style={{ width: "100%", padding: "14px", fontSize: 15, marginTop: 14 }}
         >
-          {loading ? "Creating…" : "Create Account"}
+          {otpSending ? "Sending code…" : loading ? "Creating…" : otpSent ? "Create Account" : "Send verification code"}
         </button>
 
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "var(--muted)" }}>

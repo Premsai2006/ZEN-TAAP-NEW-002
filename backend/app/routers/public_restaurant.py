@@ -38,6 +38,11 @@ async def public_categories(slug: str):
 @router.post("/{slug}/orders", response_model=Order)
 async def public_create_order(slug: str, body: OrderCreate):
     doc = await rest_svc.require_by_slug(slug)
+    if doc.get("suspended"):
+        raise HTTPException(
+            status_code=403,
+            detail="This restaurant is not accepting orders right now.",
+        )
     if not await has_active_subscription(doc["id"]):
         raise HTTPException(
             status_code=402,

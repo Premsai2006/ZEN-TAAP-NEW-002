@@ -6,7 +6,7 @@ import time
 from typing import Optional, Tuple
 
 from app.services import restaurants as rest_svc
-from app.services.pricing import compute_price, compute_price_for_restaurant
+from app.services.pricing import compute_price, compute_price_for_restaurant, hydrate_pricing
 from app.services.razorpay_client import razorpay_client
 from app.services.razorpay_plans import get_plan_id_for_tables, get_plan_id_for_restaurant
 
@@ -341,6 +341,7 @@ async def create_checkout_subscription(
     First Checkout payment authorises the mandate; later charges auto-debit.
     Returns (checkout_payload_for_frontend, raw_subscription).
     """
+    await hydrate_pricing()
     client = razorpay_client()
     if not client:
         raise RuntimeError("Razorpay is not configured")

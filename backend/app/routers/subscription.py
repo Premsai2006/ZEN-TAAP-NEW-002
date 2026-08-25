@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from app.config import TRIAL_DAYS
 from app.models import SubscribeBody
-from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant
+from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant, hydrate_pricing
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
 from app.services.razorpay_client import razorpay_configured
@@ -20,6 +20,7 @@ router = APIRouter(tags=["subscription"])
 
 @router.get("/pricing")
 async def pricing(tables: int = 14):
+    await hydrate_pricing()
     return compute_price(tables)
 
 
@@ -27,6 +28,7 @@ async def pricing(tables: int = 14):
 async def pricing_for_me(tables: int = 14, sess=Depends(require_manager)):
     """Restaurant-aware pricing (honours billing_override_paise for demo accounts)."""
     doc, _status = await refresh_subscription_status(sess["restaurant_id"])
+    await hydrate_pricing()
     return compute_price_for_restaurant(tables, doc)
 
 
@@ -34,6 +36,7 @@ async def pricing_for_me(tables: int = 14, sess=Depends(require_manager)):
 async def upgrade_quote(tables: int, sess=Depends(require_manager)):
     """Preview mid-cycle upgrade proration for the logged-in restaurant."""
     doc, status = await refresh_subscription_status(sess["restaurant_id"])
+    await hydrate_pricing()
     current = int(doc.get("subscription_tables") or 0)
     monthly = compute_price_for_restaurant(tables, doc)
     if status != "active" or current < 1:
@@ -128,6 +131,7 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     body.payment_method = pay_method
     now = datetime.now(timezone.utc)
     existing, current_status = await refresh_subscription_status(sess["restaurant_id"])
+    await hydrate_pricing()
     price = compute_price_for_restaurant(body.tables, existing)
     current_tables = existing.get("subscription_tables")
 

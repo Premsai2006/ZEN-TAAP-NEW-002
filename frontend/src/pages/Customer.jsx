@@ -223,7 +223,7 @@ export default function Customer() {
   const placeOrder = async (tableN) => {
     setPlacing(true);
     try {
-      const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price }));
+      const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price, menu_item_id: l.id }));
       const { data } = await api.post(`/r/${slug}/orders`, {
         table: tableN || 0,
         items,

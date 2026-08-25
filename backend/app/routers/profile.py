@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.database import db
-from app.deps import require_manager
+from app.deps import require_manager, assert_role
 from app.models import ProfileUpdate, KitchenPinUpdate
 from app.services import auth_service as auth
 from app.services import restaurants as rest_svc
@@ -24,6 +24,7 @@ async def get_profile(sess=Depends(require_manager)):
 
 @router.put("/profile")
 async def update_profile(body: ProfileUpdate, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
     rid = sess["restaurant_id"]
     update = body.model_dump(exclude_unset=True)
     if not update:
@@ -62,6 +63,7 @@ async def update_profile(body: ProfileUpdate, sess=Depends(require_manager)):
 
 @router.put("/settings/kitchen-pin")
 async def update_kitchen_pin(body: KitchenPinUpdate, sess=Depends(require_manager)):
+    assert_role(sess, "owner", "manager")
     auth.validate_short_pin(body.new_pin, "Kitchen PIN")
     await rest_svc.update_restaurant(sess["restaurant_id"], {"kitchen_pin": hash_pin(body.new_pin)})
     return {"success": True, "kitchen_pin_set": True}

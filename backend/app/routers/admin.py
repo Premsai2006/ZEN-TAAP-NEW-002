@@ -11,10 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from app.config import ADMIN_PASSWORD, ADMIN_USERNAME
 from app.database import db
 from app.deps import clear_admin_cookie, require_admin, set_admin_cookie
-from app.models import AdminLoginBody, AdminPasswordBody, PricingUpdateBody
+from app.models import (
+    AdminLoginBody, AdminPasswordBody, PricingUpdateBody,
+    AdminSuspendBody, AdminResetPinBody, AdminBillingOverrideBody,
+)
 from app.services import auth_service as auth
 from app.services import pricing as pricing_svc
-from app.services.pins import looks_hashed, verify_pin
+from app.services.pins import hash_pin, looks_hashed, verify_pin
 from app.services.subscription_access import has_access_status, refresh_subscription_status
 
 logger = logging.getLogger("zentaap.admin")
@@ -106,7 +109,20 @@ def _restaurant_row(doc: dict, status: str) -> dict:
         "next_cycle_start": doc.get("next_cycle_start"),
         "last_payment_at": doc.get("last_payment_at"),
         "created_at": doc.get("created_at"),
+        "suspended": bool(doc.get("suspended")),
+        "billing_override_paise": doc.get("billing_override_paise"),
     }
+
+
+async def _audit(actor: str, action: str, restaurant_id: str = "", detail: str = ""):
+    await db.admin_audit.insert_one({
+        "id": str(uuid.uuid4()),
+        "actor": actor or "",
+        "action": action,
+        "restaurant_id": restaurant_id or "",
+        "detail": detail or "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 @router.post("/login")
@@ -167,16 +183,19 @@ async def change_admin_password(body: AdminPasswordBody, sess=Depends(require_ad
         {"$set": {"password": _hash_admin_password(new), "updated_at": now}},
     )
     logger.info("Admin password changed for username=%s", username)
+    await _audit(username, "admin.password_change")
     return {"success": True}
 
 
 @router.get("/pricing")
 async def get_pricing(sess=Depends(require_admin)):
+    await pricing_svc.hydrate_pricing()
     return _public_pricing()
 
 
 @router.put("/pricing")
 async def update_pricing(body: PricingUpdateBody, sess=Depends(require_admin)):
+    await pricing_svc.hydrate_pricing()
     cfg = pricing_svc.get_pricing_config()
     per_table = float(body.per_table)
     if per_table <= 0 or per_table > 100_000:
@@ -206,11 +225,13 @@ async def update_pricing(body: PricingUpdateBody, sess=Depends(require_admin)):
         "Pricing updated by %s: per_table=%s gst=%s tables=%s-%s",
         sess.get("username"), saved["per_table"], saved["gst_rate"], saved["min_tables"], saved["max_tables"],
     )
+    await _audit(sess.get("username") or "", "pricing.update", detail=f"per_table={saved['per_table']}")
     return _public_pricing()
 
 
 @router.get("/overview")
 async def overview(sess=Depends(require_admin)):
+    await pricing_svc.hydrate_pricing()
     cfg = pricing_svc.get_pricing_config()
     restaurants = []
     status_counts = Counter()
@@ -284,3 +305,68 @@ async def restaurant_detail(restaurant_id: str, sess=Depends(require_admin)):
         "orders": order_count,
         "paid_orders": paid_count,
     }
+
+
+@router.post("/restaurants/{restaurant_id}/suspend")
+async def suspend_restaurant(restaurant_id: str, body: AdminSuspendBody, sess=Depends(require_admin)):
+    raw = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "id": 1, "restaurant_name": 1})
+    if not raw:
+        raise HTTPException(status_code=404, detail="Restaurant not found.")
+    await db.restaurants.update_one(
+        {"id": restaurant_id},
+        {"$set": {"suspended": bool(body.suspended)}},
+    )
+    if body.suspended:
+        await db.sessions.delete_many({"restaurant_id": restaurant_id})
+    actor = sess.get("username") or ""
+    await _audit(actor, "restaurant.suspend" if body.suspended else "restaurant.unsuspend", restaurant_id)
+    return {"success": True, "suspended": bool(body.suspended)}
+
+
+@router.post("/restaurants/{restaurant_id}/reset-pin")
+async def admin_reset_pin(restaurant_id: str, body: AdminResetPinBody, sess=Depends(require_admin)):
+    raw = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "id": 1})
+    if not raw:
+        raise HTTPException(status_code=404, detail="Restaurant not found.")
+    new_pin = (body.new_pin or "").strip()
+    if not new_pin:
+        import secrets
+        new_pin = f"{secrets.randbelow(1_000_000):06d}"
+    auth.validate_pin(new_pin, new=True)
+    await db.restaurants.update_one(
+        {"id": restaurant_id},
+        {"$set": {"pin": hash_pin(new_pin)}},
+    )
+    await db.sessions.delete_many({"restaurant_id": restaurant_id, "scope": "manager"})
+    await _audit(sess.get("username") or "", "restaurant.reset_pin", restaurant_id)
+    return {"success": True, "new_pin": new_pin}
+
+
+@router.put("/restaurants/{restaurant_id}/billing-override")
+async def admin_billing_override(restaurant_id: str, body: AdminBillingOverrideBody, sess=Depends(require_admin)):
+    raw = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "id": 1})
+    if not raw:
+        raise HTTPException(status_code=404, detail="Restaurant not found.")
+    paise = body.billing_override_paise
+    if paise is None:
+        await db.restaurants.update_one(
+            {"id": restaurant_id},
+            {"$unset": {"billing_override_paise": 1}},
+        )
+        await _audit(sess.get("username") or "", "restaurant.billing_override_clear", restaurant_id)
+        return {"success": True, "billing_override_paise": None}
+    paise = int(paise)
+    if paise < 100 or paise > 1000:
+        raise HTTPException(status_code=400, detail="Override must be ₹1–₹10 (100–1000 paise), or empty to clear.")
+    await db.restaurants.update_one(
+        {"id": restaurant_id},
+        {"$set": {"billing_override_paise": paise}},
+    )
+    await _audit(sess.get("username") or "", "restaurant.billing_override", restaurant_id, detail=str(paise))
+    return {"success": True, "billing_override_paise": paise}
+
+
+@router.get("/audit")
+async def admin_audit(sess=Depends(require_admin)):
+    rows = await db.admin_audit.find({}, {"_id": 0}).sort("created_at", -1).to_list(80)
+    return {"events": rows}
