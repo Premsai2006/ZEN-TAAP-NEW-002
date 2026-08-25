@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import HTTPException, Request, Response, Depends
-from app.config import MGR_COOKIE, DEMO_MODE
+from app.config import MGR_COOKIE, ADM_COOKIE, DEMO_MODE
 from app.database import db
 from app.services import restaurants as rest_svc
 from app.services.subscription_access import refresh_subscription_status, has_access_status
@@ -30,6 +30,46 @@ def set_manager_cookie(response: Response, token: str) -> None:
 
 def clear_manager_cookie(response: Response) -> None:
     response.delete_cookie(key=MGR_COOKIE, path="/")
+
+
+def extract_admin_token(request: Request) -> str:
+    cookie_token = request.cookies.get(ADM_COOKIE)
+    if cookie_token:
+        return cookie_token.strip()
+    auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return ""
+
+
+def set_admin_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=ADM_COOKIE,
+        value=token,
+        httponly=True,
+        secure=not DEMO_MODE,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 7,
+    )
+
+
+def clear_admin_cookie(response: Response) -> None:
+    response.delete_cookie(key=ADM_COOKIE, path="/")
+
+
+async def require_admin(request: Request):
+    token = extract_admin_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Please log in to continue.")
+    sess = await db.sessions.find_one({"scope": "admin", "token": token})
+    if not sess:
+        raise HTTPException(status_code=401, detail="Session expired — please log in again.")
+    await db.sessions.update_one(
+        {"_id": sess["_id"]},
+        {"$set": {"last_used": datetime.now(timezone.utc).isoformat()}},
+    )
+    return sess
 
 
 async def require_manager(request: Request):

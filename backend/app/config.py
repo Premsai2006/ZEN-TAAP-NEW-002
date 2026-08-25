@@ -28,8 +28,13 @@ SMTP_FROM = os.environ.get("SMTP_FROM", "") or (f"ZenTaap <{SMTP_USER}>" if SMTP
 SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() in ("1", "true", "yes")
 
 MGR_COOKIE = "mgr_token"
+ADM_COOKIE = "adm_token"
 MAX_DEVICES = 4
 DEFAULT_PIN = "123456"
+
+# Platform admin panel (/admin). Leave blank to disable login.
+ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "").strip()
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 
 # Pricing
 BASE_FEE = 0

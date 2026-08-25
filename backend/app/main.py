@@ -7,9 +7,10 @@ from app.config import DEMO_MODE, CORS_ORIGINS
 from app.database import client, db
 from app.routers import (
     auth, profile, categories, menu, orders, settings, subscription, payments, stats, upload,
-    public_restaurant,
+    public_restaurant, admin,
 )
 from app.services import restaurants as rest_svc
+from app.services import pricing as pricing_svc
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("zentaap")
@@ -28,6 +29,7 @@ api_router.include_router(payments.router)
 api_router.include_router(stats.router)
 api_router.include_router(upload.router)
 api_router.include_router(public_restaurant.router)
+api_router.include_router(admin.router)
 
 
 @api_router.get("/")
@@ -57,6 +59,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def seed():
     await rest_svc.ensure_indexes()
+    await pricing_svc.hydrate_pricing()
+    await admin.bootstrap_admin()
     migrated = await rest_svc.migrate_singleton_to_restaurants()
     if migrated:
         logger.info("Multi-tenant migration ready: restaurant_id=%s", migrated)

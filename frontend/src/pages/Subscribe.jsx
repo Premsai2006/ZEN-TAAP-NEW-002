@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download, LogOut } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
 import { downloadAllQrsZip } from "@/lib/qrDownload";
+import LogoutDialog from "@/components/manager/LogoutDialog";
 import {
   GPayMark, PhonePeMark, PaytmMark, BHIMMark,
   VisaMark, MastercardMark, RuPayMark,
@@ -14,8 +15,6 @@ import {
   AmazonPayMark, FreechargeMark, MobikwikMark,
 } from "@/components/subscribe/BrandLogos";
 
-const MIN_T = 10;
-const MAX_T = 60;
 const fmtRupee = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
   if (!iso) return "—";
@@ -61,6 +60,8 @@ export default function Subscribe() {
   const [method, setMethod] = useState("upi");
   const [paying, setPaying] = useState(false);
   const [existing, setExisting] = useState(null);
+  const [subLoaded, setSubLoaded] = useState(false);
+  const [showLogout, setShowLogout] = useState(false);
   const [zippingQrs, setZippingQrs] = useState(false);
 
   useEffect(() => {
@@ -79,13 +80,31 @@ export default function Subscribe() {
         if (r.data?.tables) setTables(r.data.tables);
         if (r.data?.payment_method) setMethod(r.data.payment_method);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSubLoaded(true));
   }, []);
 
   const hasActive = existing && existing.tables && ["trial", "active"].includes(existing.status);
   const canStartTrial = !existing || !existing.status || ["none", "skipped"].includes(existing.status);
   const isExpired = existing?.status === "expired";
   const isChangeRequest = hasActive && tables !== existing.tables;
+  const minT = pricing?.min_tables ?? 10;
+  const maxT = pricing?.max_tables ?? 60;
+  const sliderMarks = useMemo(() => {
+    if (maxT <= minT) return [minT];
+    const marks = [];
+    for (let i = 0; i <= 5; i += 1) {
+      marks.push(Math.round(minT + ((maxT - minT) * i) / 5));
+    }
+    return [...new Set(marks)];
+  }, [minT, maxT]);
+
+  useEffect(() => {
+    if (!pricing) return;
+    const lo = pricing.min_tables ?? 10;
+    const hi = pricing.max_tables ?? 60;
+    setTables((t) => Math.min(hi, Math.max(lo, t)));
+  }, [pricing?.min_tables, pricing?.max_tables]);
 
   const effectiveFrom = useMemo(() => {
     const raw = existing?.effective_from || existing?.next_cycle_start;
@@ -239,24 +258,52 @@ export default function Subscribe() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch (err) {
+      console.warn("logout request failed:", err?.message);
+    }
+    localStorage.removeItem("mgr_token");
+    localStorage.removeItem("mgr_authed");
+    navigate("/login");
+  };
+
   return (
     <div className="sub-shell" data-testid="subscribe-page">
       <div className="sub-topbar">
-        <button
-          onClick={() => navigate(-1)}
-          className="sub-back-btn"
-          data-testid="subscribe-back-btn"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
+        {subLoaded && !isExpired ? (
+          <button
+            onClick={() => navigate(-1)}
+            className="sub-back-btn"
+            data-testid="subscribe-back-btn"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+        ) : (
+          <div className="sub-topbar-side" aria-hidden="true" />
+        )}
         <img src="/logo.png" alt="ZenTaap" style={{ height: 38, background: "#fff", padding: "6px 12px", borderRadius: 10 }} />
-        <button
-          onClick={() => navigate("/manager")}
-          className="sub-skip-btn"
-          data-testid="subscribe-skip-btn"
-        >
-          Maybe later
-        </button>
+        {subLoaded && isExpired ? (
+          <button
+            type="button"
+            onClick={() => setShowLogout(true)}
+            className="sub-logout-btn"
+            data-testid="subscribe-logout-btn"
+          >
+            <LogOut size={16} /> Logout
+          </button>
+        ) : subLoaded ? (
+          <button
+            onClick={() => navigate("/manager")}
+            className="sub-skip-btn"
+            data-testid="subscribe-skip-btn"
+          >
+            Maybe later
+          </button>
+        ) : (
+          <div className="sub-topbar-side" aria-hidden="true" />
+        )}
       </div>
 
       <div className="sub-screen narrow" style={{ maxWidth: 680 }}>
@@ -394,20 +441,17 @@ export default function Subscribe() {
                 </div>
                 <input
                   type="range"
-                  min={MIN_T}
-                  max={MAX_T}
+                  min={minT}
+                  max={maxT}
                   value={tables}
                   onChange={(e) => setTables(parseInt(e.target.value, 10))}
                   className="table-slider"
                   data-testid="tables-slider"
                 />
                 <div className="slider-marks">
-                  <span>10</span>
-                  <span>20</span>
-                  <span>30</span>
-                  <span>40</span>
-                  <span>50</span>
-                  <span>60</span>
+                  {sliderMarks.map((n) => (
+                    <span key={n}>{n}</span>
+                  ))}
                 </div>
               </div>
 
@@ -528,7 +572,7 @@ export default function Subscribe() {
               <div className="formula-row">
                 <div className="f-box highlight">₹{pricing.per_table} × {tables} tables</div>
                 <div className="f-op">+</div>
-                <div className="f-box" style={{ background: "rgba(110,164,255,0.15)" }}>GST 18%</div>
+                <div className="f-box" style={{ background: "rgba(110,164,255,0.15)" }}>GST {pricing.gst_rate_pct}%</div>
                 <div className="f-op">=</div>
                 <div className="f-box result">{fmtRupee(pricing.total_with_tax)}/mo</div>
               </div>
@@ -618,6 +662,12 @@ export default function Subscribe() {
           <ShieldCheck size={12} /> Secured by 256-bit SSL · PCI DSS · UPI Autopay
         </div>
       </div>
+
+      <LogoutDialog
+        open={showLogout}
+        onCancel={() => setShowLogout(false)}
+        onConfirm={handleLogout}
+      />
     </div>
   );
 }

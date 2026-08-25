@@ -11,10 +11,18 @@ import "@/App.css";
 
 // Lazy-load payment/subscription bundle so Menu & Orders don't pay the cost (issue #20)
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
+const Admin = lazy(() => import("@/pages/Admin"));
+const AdminLogin = lazy(() => import("@/pages/AdminLogin"));
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("mgr_token");
   if (!token) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireAdmin({ children }) {
+  const token = localStorage.getItem("admin_token");
+  if (!token) return <Navigate to="/admin/login" replace />;
   return children;
 }
 
@@ -60,6 +68,24 @@ function App() {
           <Route path="/r/:slug" element={<Customer />} />
           <Route path="/kitchen" element={<Kitchen />} />
           <Route path="/kitchen/:slug" element={<Kitchen />} />
+          <Route
+            path="/admin/login"
+            element={
+              <Suspense fallback={<LazyFallback />}>
+                <AdminLogin />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<LazyFallback />}>
+                  <Admin />
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
         </Routes>
       </BrowserRouter>
       <Toaster theme={localStorage.getItem("tt_theme") === "light" ? "light" : "dark"} position="top-right" />

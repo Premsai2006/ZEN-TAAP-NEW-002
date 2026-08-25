@@ -202,3 +202,21 @@ class VerifySubscriptionBody(BaseModel):
     razorpay_subscription_id: str
     razorpay_payment_id: str
     razorpay_signature: Optional[str] = None
+
+
+class AdminLoginBody(BaseModel):
+    username: str
+    password: str
+
+
+class AdminPasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class PricingUpdateBody(BaseModel):
+    per_table: float
+    base_fee: Optional[float] = None
+    gst_rate_pct: Optional[float] = None
+    min_tables: Optional[int] = None
+    max_tables: Optional[int] = None
