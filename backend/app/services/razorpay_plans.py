@@ -13,19 +13,27 @@ logger = logging.getLogger(__name__)
 COLLECTION = "razorpay_plans"
 
 
+def _plan_key(tables: int, *, amount_paise: Optional[int] = None, override: bool = False) -> str:
+    if override and amount_paise is not None:
+        return f"override_{int(amount_paise)}"
+    return f"tables_{int(tables)}"
+
+
 async def get_plan_id_for_tables(tables: int, *, amount_paise: Optional[int] = None) -> Optional[str]:
     """Return cached Razorpay plan_id for this table count (and optional amount override)."""
     tables = int(tables)
     if amount_paise is not None:
-        row = await db[COLLECTION].find_one(
-            {"tables": tables, "amount_paise": int(amount_paise), "override": True},
-            {"_id": 0},
-        )
+        key = _plan_key(tables, amount_paise=int(amount_paise), override=True)
+        row = await db[COLLECTION].find_one({"plan_key": key}, {"_id": 0})
         if row and row.get("plan_id"):
             return row["plan_id"]
         return await ensure_plan_for_tables(tables, amount_paise=int(amount_paise), override=True)
 
-    row = await db[COLLECTION].find_one({"tables": tables, "override": {"$ne": True}}, {"_id": 0})
+    key = _plan_key(tables)
+    row = await db[COLLECTION].find_one({"plan_key": key}, {"_id": 0})
+    if not row:
+        # legacy rows keyed only by tables
+        row = await db[COLLECTION].find_one({"tables": tables, "override": {"$ne": True}}, {"_id": 0})
     if row and row.get("plan_id"):
         return row["plan_id"]
     return await ensure_plan_for_tables(tables)
@@ -51,10 +59,16 @@ async def ensure_plan_for_tables(
     if not client:
         raise RuntimeError("Razorpay is not configured")
 
-    query = {"tables": int(tables), "amount_paise": int(amount_paise), "override": bool(override)}
-    existing = await db[COLLECTION].find_one(query, {"_id": 0})
+    key = _plan_key(tables, amount_paise=amount_paise, override=override)
+    existing = await db[COLLECTION].find_one({"plan_key": key}, {"_id": 0})
     if existing and existing.get("plan_id") and existing.get("amount_paise") == amount_paise:
         return existing["plan_id"]
+    # legacy lookup
+    if not override:
+        legacy = await db[COLLECTION].find_one({"tables": int(tables), "override": {"$ne": True}}, {"_id": 0})
+        if legacy and legacy.get("plan_id") and legacy.get("amount_paise") == amount_paise:
+            await db[COLLECTION].update_one({"tables": int(tables)}, {"$set": {"plan_key": key}})
+            return legacy["plan_id"]
 
     name = (
         f"ZenTaap DEMO mandate ₹{amount_paise/100:.0f}"
@@ -79,14 +93,16 @@ async def ensure_plan_for_tables(
                 "tables": str(tables),
                 "product": "zentaap",
                 "override": "1" if override else "0",
+                "plan_key": key,
             },
         }
     )
     plan_id = plan["id"]
     await db[COLLECTION].update_one(
-        {"tables": int(tables), "amount_paise": int(amount_paise), "override": bool(override)},
+        {"plan_key": key},
         {
             "$set": {
+                "plan_key": key,
                 "tables": int(tables),
                 "plan_id": plan_id,
                 "amount_paise": int(amount_paise),
@@ -97,15 +113,28 @@ async def ensure_plan_for_tables(
         upsert=True,
     )
     logger.info(
-        "Razorpay plan ready tables=%s plan_id=%s amount_paise=%s override=%s",
-        tables, plan_id, amount_paise, override,
+        "Razorpay plan ready key=%s plan_id=%s amount_paise=%s",
+        key, plan_id, amount_paise,
     )
     return plan_id
 
 
 async def bootstrap_all_plans(min_tables: int = 10, max_tables: int = 60) -> dict:
     """Create/cache plans for every table tier. Used by deploy script."""
+    # Drop legacy unique-on-tables index if present (blocks micro-mandate plans)
+    try:
+        await db[COLLECTION].drop_index("tables_1")
+        logger.info("Dropped legacy razorpay_plans.tables_1 index")
+    except Exception:
+        pass
+    try:
+        await db[COLLECTION].create_index("plan_key", unique=True, sparse=True)
+    except Exception as exc:
+        logger.warning("plan_key index: %s", exc)
+
     created = {}
     for tables in range(min_tables, max_tables + 1):
         created[str(tables)] = await ensure_plan_for_tables(tables)
+    # Always ensure ₹2 demo micro-mandate plan exists
+    created["override_200"] = await ensure_plan_for_tables(10, amount_paise=200, override=True)
     return created
