@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from app.database import db
-from app.services.pricing import compute_price
+from app.services.pricing import compute_price, compute_price_for_restaurant
 from app.services.subscription_access import BILLING_CYCLE_DAYS
 from app.services import restaurants as rest_svc
 
@@ -22,6 +22,7 @@ async def record_payment(
     status: str = "captured",
     source: str = "verify",
     tables: Optional[int] = None,
+    kind: Optional[str] = None,
     raw: Optional[dict] = None,
 ) -> dict:
     """Idempotent payment history row keyed by payment_id when present."""
@@ -44,6 +45,7 @@ async def record_payment(
         "status": status,
         "source": source,
         "tables": tables,
+        "kind": kind or (raw or {}).get("kind") or "subscription",
         "created_at": now,
         "raw": raw or {},
     }
@@ -61,17 +63,31 @@ async def activate_paid_subscription(
     enable_autopay: bool = False,
     source: str = "verify",
     tables_override: Optional[int] = None,
+    preserve_cycle: bool = False,
+    next_cycle_override: Optional[str] = None,
+    payment_kind: str = "subscription",
 ) -> dict:
-    """Mark restaurant active and extend billing cycle after verified payment."""
+    """Mark restaurant active after verified payment. Optionally keep existing cycle end."""
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     now = datetime.now(timezone.utc)
-    next_cycle = now + timedelta(days=BILLING_CYCLE_DAYS)
 
-    tables = tables_override or doc.get("pending_tables") or doc.get("subscription_tables")
+    tables = (
+        tables_override
+        or doc.get("pending_checkout_tables")
+        or doc.get("pending_tables")
+        or doc.get("subscription_tables")
+    )
     try:
         tables = int(tables) if tables is not None else None
     except Exception:
         tables = doc.get("subscription_tables")
+
+    if preserve_cycle and (next_cycle_override or doc.get("next_cycle_start")):
+        next_cycle = next_cycle_override or doc.get("next_cycle_start")
+        cycle_start = doc.get("cycle_start") or now.isoformat()
+    else:
+        next_cycle = (now + timedelta(days=BILLING_CYCLE_DAYS)).isoformat()
+        cycle_start = now.isoformat()
 
     update = {
         "subscription_status": "active",
@@ -79,16 +95,19 @@ async def activate_paid_subscription(
         "last_payment_id": payment_id,
         "last_payment_order_id": order_id,
         "last_payment_at": now.isoformat(),
-        "cycle_start": now.isoformat(),
-        "next_cycle_start": next_cycle.isoformat(),
+        "cycle_start": cycle_start,
+        "next_cycle_start": next_cycle,
         "autopay_enabled": bool(enable_autopay or subscription_id),
-        "autopay_ready": bool(subscription_id),
+        "autopay_ready": bool(subscription_id) if subscription_id else bool(doc.get("autopay_ready")),
+        "pending_checkout_kind": None,
+        "pending_checkout_preserve_cycle": None,
+        "pending_checkout_next_cycle": None,
     }
     if subscription_id:
         update["razorpay_subscription_id"] = subscription_id
 
     if tables:
-        price = compute_price(int(tables))
+        price = compute_price_for_restaurant(int(tables), doc)
         update.update({
             "subscription_tables": int(tables),
             "subscription_subtotal": price["subtotal"],
@@ -108,5 +127,14 @@ async def activate_paid_subscription(
         amount_paise=amount_paise,
         source=source,
         tables=tables,
+        kind=payment_kind,
+        raw={"kind": payment_kind, "preserve_cycle": preserve_cycle},
     )
-    return {**doc, **update, "next_cycle_start": next_cycle.isoformat()}
+    return {
+        **doc,
+        **update,
+        "next_cycle_start": next_cycle,
+        "cycle_start": cycle_start,
+        "payment_kind": payment_kind,
+        "preserve_cycle": preserve_cycle,
+    }

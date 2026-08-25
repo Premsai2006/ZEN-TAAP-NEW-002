@@ -2,18 +2,12 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download, LogOut } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, Calculator, FileText, RefreshCw, QrCode, Repeat, Download, LogOut, X, CheckCircle2, XCircle, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
 import { downloadAllQrsZip } from "@/lib/qrDownload";
 import LogoutDialog from "@/components/manager/LogoutDialog";
-import {
-  GPayMark, PhonePeMark, PaytmMark, BHIMMark,
-  VisaMark, MastercardMark, RuPayMark,
-  HDFCMark, ICICIMark, SBIMark, AxisMark,
-  AmazonPayMark, FreechargeMark, MobikwikMark,
-} from "@/components/subscribe/BrandLogos";
 
 const fmtRupee = (n) => `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (iso) => {
@@ -21,54 +15,27 @@ const fmtDate = (iso) => {
   try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
 };
 
-const PAYMENT_METHODS = [
-  {
-    key: "upi",
-    label: "UPI",
-    icon: Smartphone,
-    note: "GPay · PhonePe · Paytm · BHIM",
-    marks: [GPayMark, PhonePeMark, PaytmMark, BHIMMark],
-  },
-  {
-    key: "card",
-    label: "Credit / Debit Card",
-    icon: CreditCard,
-    note: "VISA · MasterCard · RuPay",
-    marks: [VisaMark, MastercardMark, RuPayMark],
-  },
-  {
-    key: "netbanking",
-    label: "Net Banking",
-    icon: Building2,
-    note: "HDFC · ICICI · SBI · Axis",
-    marks: [HDFCMark, ICICIMark, SBIMark, AxisMark],
-  },
-  {
-    key: "wallet",
-    label: "Wallets",
-    icon: Wallet,
-    note: "Amazon Pay · Freecharge · MobiKwik · Paytm",
-    marks: [AmazonPayMark, FreechargeMark, MobikwikMark, PaytmMark],
-  },
-];
-
 export default function Subscribe() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("calc");
   const [tables, setTables] = useState(14);
   const [pricing, setPricing] = useState(null);
-  const [method, setMethod] = useState("upi");
   const [paying, setPaying] = useState(false);
   const [existing, setExisting] = useState(null);
   const [subLoaded, setSubLoaded] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [zippingQrs, setZippingQrs] = useState(false);
+  const [upgradeQuote, setUpgradeQuote] = useState(null);
+  const [payResult, setPayResult] = useState(null); // { ok, title, message, detail }
 
   useEffect(() => {
     api
-      .get(`/pricing?tables=${tables}`)
+      .get(`/pricing/me?tables=${tables}`)
       .then((r) => setPricing(r.data))
-      .catch(() => {});
+      .catch(() => {
+        // Fallback to public pricing if session cookie missing
+        api.get(`/pricing?tables=${tables}`).then((r) => setPricing(r.data)).catch(() => {});
+      });
   }, [tables]);
 
   // Load existing subscription once on mount; pre-fill slider with current tables.
@@ -78,11 +45,28 @@ export default function Subscribe() {
       .then((r) => {
         setExisting(r.data);
         if (r.data?.tables) setTables(r.data.tables);
-        if (r.data?.payment_method) setMethod(r.data.payment_method);
       })
       .catch(() => {})
       .finally(() => setSubLoaded(true));
   }, []);
+
+  // Live mid-cycle upgrade proration preview
+  useEffect(() => {
+    if (!existing?.tables || existing.status !== "active" || tables <= existing.tables) {
+      setUpgradeQuote(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/pricing/upgrade-quote?tables=${tables}`)
+      .then((r) => {
+        if (!cancelled) setUpgradeQuote(r.data);
+      })
+      .catch(() => {
+        if (!cancelled) setUpgradeQuote(null);
+      });
+    return () => { cancelled = true; };
+  }, [tables, existing?.tables, existing?.status, existing?.next_cycle_start]);
 
   const hasActive = existing && existing.tables && ["trial", "active"].includes(existing.status);
   const canStartTrial = !existing || !existing.status || ["none", "skipped"].includes(existing.status);
@@ -98,6 +82,11 @@ export default function Subscribe() {
     }
     return [...new Set(marks)];
   }, [minT, maxT]);
+  const isUpgradeIntent =
+    existing?.status === "active" && tables > (existing?.tables || 0);
+  const isUpgradeNow = isUpgradeIntent && upgradeQuote?.applicable && upgradeQuote?.proration;
+  const prorate = isUpgradeNow ? upgradeQuote.proration : null;
+  const isProratedUpgrade = Boolean(prorate?.preserve_cycle);
 
   useEffect(() => {
     if (!pricing) return;
@@ -153,6 +142,15 @@ export default function Subscribe() {
     });
 
   const downloadSubscribeQRs = async () => {
+    if (!hasActive) {
+      toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
+        description: isExpired
+          ? "Renew your subscription first, then download clear table QRs."
+          : "Complete payment or start a trial to download QRs.",
+        id: "sub-qr-locked",
+      });
+      return;
+    }
     const slug = (localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
     if (!slug) {
       return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
@@ -177,11 +175,13 @@ export default function Subscribe() {
     }
   };
 
+  const showPayResult = (payload) => setPayResult(payload);
+
   const onSubscribe = async () => {
     if (!pricing) return;
     setPaying(true);
     try {
-      const { data: planResp } = await api.post("/subscription", { tables, payment_method: method });
+      const { data: planResp } = await api.post("/subscription", { tables });
 
       if (planResp.applied === "next_cycle") {
         toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
@@ -189,17 +189,18 @@ export default function Subscribe() {
         return;
       }
       if (planResp.applied === "no_change") {
-        toast.success("Payment method updated");
+        toast.success("You're already on this plan");
         navigate("/manager");
         return;
       }
       if (planResp.applied === "trial") {
         toast.success(`Free trial started — ends ${fmtDate(planResp.trial_end)}. Pay anytime before it ends.`);
-        // Optional: open checkout for first paid cycle now
       }
 
-      // Payment required (expired renew / upgrade) OR optional pay after trial start
-      const needsPay = planResp.needs_payment || planResp.applied === "awaiting_payment";
+      const needsPay =
+        planResp.needs_payment ||
+        planResp.applied === "awaiting_payment" ||
+        planResp.applied === "upgrade_proration";
       if (!needsPay && planResp.applied === "trial") {
         navigate("/manager");
         return;
@@ -210,20 +211,40 @@ export default function Subscribe() {
         return;
       }
 
-      const { data: checkout } = await api.post("/payments/create-subscription", { tables });
+      const isUpgrade =
+        planResp.applied === "upgrade_proration" ||
+        planResp.proration?.kind === "upgrade_proration" ||
+        (existing?.status === "active" && tables > (existing?.tables || 0));
+
       const ok = await loadRazorpayScript();
       if (!ok || !window.Razorpay) {
-        toast.error("Payment couldn't start. Please refresh the page and try again.");
+        showPayResult({
+          ok: false,
+          title: "Payment couldn't start",
+          message: "Please refresh the page and try again.",
+        });
         return;
       }
-      const rzpOptions = {
+
+      // Renew OR mid-cycle upgrade: always one Razorpay Subscription checkout
+      // Upgrade = proration addon now + new higher mandate (old mandate ends this cycle)
+      const { data: checkout } = await api.post("/payments/create-subscription", { tables });
+      const pr = checkout.proration || planResp.proration;
+      const payAmt = (checkout.amount || 0) / 100;
+      new window.Razorpay({
         key: checkout.key_id,
         subscription_id: checkout.subscription_id,
         name: "ZenTaap",
-        description: `${tables} tables · monthly subscription (auto-renew)`,
+        description:
+          checkout.description
+          || (isUpgrade
+            ? `Upgrade to ${tables} tables · pay remaining days + set monthly autopay`
+            : `${tables} tables · monthly autopay mandate`),
         theme: { color: "#e87d2f" },
-        prefill: { method },
-        notes: { tables: String(tables) },
+        notes: {
+          tables: String(tables),
+          kind: checkout.upgrade ? "upgrade_proration" : "monthly_mandate",
+        },
         handler: async (resp) => {
           try {
             const { data: verified } = await api.post("/payments/verify-subscription", {
@@ -231,28 +252,75 @@ export default function Subscribe() {
               razorpay_payment_id: resp.razorpay_payment_id,
               razorpay_signature: resp.razorpay_signature,
             });
-            toast.success(
-              verified?.next_cycle_start
-                ? `Subscription active — auto-renews ${fmtDate(verified.next_cycle_start)}`
-                : "Subscription active — monthly autopay enabled!"
-            );
-            navigate("/manager");
+            const paid = verified?.amount_paise != null
+              ? fmtRupee(verified.amount_paise / 100)
+              : fmtRupee(payAmt);
+            if (checkout.upgrade || isUpgrade) {
+              showPayResult({
+                ok: true,
+                title: "Upgrade complete!",
+                message: `All ${verified?.tables || tables} tables are unlocked. Charged ${paid} for the days left.`,
+                detail: verified?.next_cycle_start
+                  ? `From ${fmtDate(verified.next_cycle_start)} autopay will deduct the full ${tables}-table plan automatically. Old mandate stopped.`
+                  : "Monthly autopay is set to the new table count.",
+                goManager: true,
+              });
+            } else {
+              showPayResult({
+                ok: true,
+                title: "Payment successful!",
+                message: verified?.message
+                  || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
+                detail: verified?.next_cycle_start
+                  ? `Next auto-debit on ${fmtDate(verified.next_cycle_start)} · ${tables} tables.`
+                  : "You can turn autopay off anytime from Subscription.",
+                goManager: true,
+              });
+            }
           } catch (err) {
-            toast.error(friendlyError(err, "We couldn't confirm your subscription. Please try again or contact support."));
+            // Rare race: webhook may activate before verify returns — re-check status
+            try {
+              const { data: sub } = await api.get("/subscription");
+              if (sub && ["trial", "active"].includes(sub.status)) {
+                showPayResult({
+                  ok: true,
+                  title: "Payment successful!",
+                  message: "Your subscription is active. Autopay is set for monthly renewals.",
+                  detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
+                  goManager: true,
+                });
+                return;
+              }
+            } catch { /* ignore */ }
+            showPayResult({
+              ok: false,
+              title: "Payment confirmation failed",
+              message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, refresh this page — access often unlocks within a few seconds."),
+              detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
+            });
           }
         },
         modal: {
-          ondismiss: () =>
-            toast.info(
-              needsPay
-                ? "Payment cancelled — account stays locked until subscription is activated."
-                : "Payment cancelled — you can subscribe later from this page."
-            ),
+          ondismiss: async () => {
+            try {
+              await api.post("/payments/abandon-checkout");
+            } catch { /* keep local messaging even if abandon fails */ }
+            showPayResult({
+              ok: false,
+              title: "Payment cancelled",
+              message: needsPay
+                ? "Payment cancelled — nothing was charged. Your existing plan is unchanged."
+                : "Payment cancelled — you can set up autopay later from this page.",
+            });
+          },
         },
-      };
-      new window.Razorpay(rzpOptions).open();
+      }).open();
     } catch (err) {
-      toast.error(friendlyError(err, "Couldn't start your subscription. Please try again."));
+      showPayResult({
+        ok: false,
+        title: "Couldn't start subscription",
+        message: friendlyError(err, "Please try again."),
+      });
     } finally {
       setPaying(false);
     }
@@ -372,7 +440,7 @@ export default function Subscribe() {
           </div>
         )}
 
-        {/* Active subscription banner: mid-cycle change applies next cycle */}
+        {/* Active subscription banner */}
         {hasActive && (
           <div
             data-testid="sub-change-notice"
@@ -391,14 +459,24 @@ export default function Subscribe() {
             <RefreshCw size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
             <div style={{ fontSize: 13, lineHeight: 1.55, flex: 1 }}>
               You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
-              {isChangeRequest ? (
+              {isProratedUpgrade ? (
+                <>
+                  Adding tables now? Pay only for the <b>extra tables</b> for the days left in this cycle.
+                  From <b>{fmtDate(prorate?.next_cycle_start || existing.next_cycle_start)}</b> you&apos;ll
+                  be billed the full <b>{tables}-table</b> plan.
+                </>
+              ) : isChangeRequest && tables < existing.tables ? (
+                <>
+                  Reducing to <b>{tables} tables</b> takes effect from <b>{fmtEffective}</b> (next cycle).
+                  Your current cycle continues unchanged until then.
+                </>
+              ) : isChangeRequest ? (
                 <>
                   Updating to <b>{tables} tables</b> will be billed from <b>{fmtEffective}</b>
                   {effectiveFrom && effectiveFrom.getTime() <= Date.now() + 60_000 ? " (effective immediately)" : " (next cycle)"}.
-                  Your current cycle continues unchanged until then.
                 </>
               ) : (
-                <>Adjust the slider to change your plan. Mid-cycle changes take effect on the next cycle.</>
+                <>Adjust the slider to change your plan. Upgrades unlock after a small prorated payment for days left.</>
               )}
               <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }} data-testid="sub-cycle-dates">
                 <div className="cycle-pill cycle-pill-start">
@@ -423,6 +501,30 @@ export default function Subscribe() {
                   Pending change: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo).
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {isProratedUpgrade && prorate && (
+          <div className="prorate-card" data-testid="prorate-card">
+            <div className="prorate-card-title">Pay only for days left</div>
+            <div className="prorate-card-msg">{prorate.message}</div>
+            <div className="prorate-grid">
+              <div>
+                <div className="prorate-k">Extra tables</div>
+                <div className="prorate-v">+{prorate.extra_tables}</div>
+              </div>
+              <div>
+                <div className="prorate-k">Days remaining</div>
+                <div className="prorate-v">{prorate.remaining_days}</div>
+              </div>
+              <div>
+                <div className="prorate-k">Due now</div>
+                <div className="prorate-v gold">{fmtRupee(prorate.total_with_tax)}</div>
+              </div>
+            </div>
+            <div className="prorate-foot">
+              Full plan after {fmtDate(prorate.next_cycle_start)}: {fmtRupee(prorate.monthly_new)}/mo
             </div>
           </div>
         )}
@@ -471,7 +573,7 @@ export default function Subscribe() {
               </div>
             </div>
 
-            {/* QR codes preview — one QR per table */}
+            {/* QR codes preview — one QR per table (blurred until paid) */}
             <div className="qr-preview-card" data-testid="qr-preview-card">
               <div className="qr-preview-header">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -479,7 +581,11 @@ export default function Subscribe() {
                   <div>
                     <div className="font-serif" style={{ fontSize: 18 }}>Your {tables} QR codes</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      One QR per table. Download, laminate &amp; place on each table.
+                      {hasActive
+                        ? "One QR per table. Download, laminate & place on each table."
+                        : isExpired
+                          ? "Subscription expired — pay to unlock clear downloadable QRs."
+                          : "Pay or start a trial to unlock clear downloadable QRs."}
                     </div>
                   </div>
                 </div>
@@ -491,28 +597,55 @@ export default function Subscribe() {
                   disabled={zippingQrs}
                   style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
                 >
-                  <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-                  {zippingQrs ? "Preparing ZIP…" : "Download QRs"}
+                  {hasActive ? (
+                    <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  ) : (
+                    <Lock size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  )}
+                  {zippingQrs
+                    ? "Preparing ZIP…"
+                    : hasActive
+                      ? "Download QRs"
+                      : isExpired
+                        ? "Pay to unlock"
+                        : "Unlock QRs"}
                 </button>
               </div>
-              <div className="qr-grid" data-testid="qr-grid">
-                {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
-                  <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
-                    <QRCodeSVG
-                      value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
-                      size={84}
-                      bgColor="#ffffff"
-                      fgColor="#161310"
-                      level="M"
-                      includeMargin={false}
-                    />
-                    <div className="qr-tile-label">Table {n}</div>
+              <div className={`qr-locked-wrap${!hasActive ? " is-locked" : ""}`} data-testid="subscribe-qr-locked-wrap">
+                <div className={!hasActive ? "qr-locked-blur" : undefined}>
+                  <div className="qr-grid" data-testid="qr-grid">
+                    {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
+                      <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
+                        <QRCodeSVG
+                          value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
+                          size={84}
+                          bgColor="#ffffff"
+                          fgColor="#161310"
+                          level="M"
+                          includeMargin={false}
+                        />
+                        <div className="qr-tile-label">Table {n}</div>
+                      </div>
+                    ))}
+                    {tables > 12 && (
+                      <div className="qr-tile qr-tile-more" data-testid="qr-tile-more">
+                        <div className="qr-more-num">+{tables - 12}</div>
+                        <div className="qr-tile-label">more</div>
+                      </div>
+                    )}
                   </div>
-                ))}
-                {tables > 12 && (
-                  <div className="qr-tile qr-tile-more" data-testid="qr-tile-more">
-                    <div className="qr-more-num">+{tables - 12}</div>
-                    <div className="qr-tile-label">more</div>
+                </div>
+                {!hasActive && (
+                  <div className="qr-paywall-overlay" data-testid="subscribe-qr-paywall">
+                    <Lock size={28} className="qr-paywall-icon" color="#000" />
+                    <div className="qr-paywall-title">
+                      {isExpired ? "Pay to unlock" : "Subscribe to unlock"}
+                    </div>
+                    <div className="qr-paywall-sub">
+                      {isExpired
+                        ? "Renew your subscription first, then download clear table QRs."
+                        : "Complete payment or start a trial to download clear table QRs."}
+                    </div>
                   </div>
                 )}
               </div>
@@ -545,23 +678,34 @@ export default function Subscribe() {
               </div>
             </div>
 
-            {/* Autopay status pill */}
+            {/* Autopay / mandate status */}
             {hasActive && (
               <div className="autopay-card" data-testid="autopay-card">
                 <Repeat size={18} color={existing.autopay_enabled ? "var(--green)" : "var(--muted)"} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>
-                    Autopay {existing.autopay_enabled ? "is ON" : "is OFF"}
+                    {existing.autopay_enabled ? "Monthly autopay mandate is ON" : "Monthly autopay is OFF"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                     {existing.autopay_enabled
-                      ? `Your plan auto-renews monthly. Next charge ${fmtRupee(existing.total)} on ${fmtDate(existing.next_cycle_start)}.`
-                      : "Subscribe with Razorpay to enable monthly auto-renew on your saved payment method."}
+                      ? `ZenTaap auto-deducts ${fmtRupee(existing.total)} each cycle (next: ${fmtDate(existing.next_cycle_start)}). Cancel anytime.`
+                      : "Pay once with Razorpay Subscription to authorize a UPI/card mandate — then every month is auto-charged."}
                   </div>
                 </div>
                 <span className={`autopay-state ${existing.autopay_enabled ? "on" : "off"}`} data-testid="autopay-state">
                   {existing.autopay_enabled ? "ON" : "OFF"}
                 </span>
+              </div>
+            )}
+            {isExpired && (
+              <div className="autopay-card" data-testid="mandate-renew-card" style={{ marginTop: 0, marginBottom: 18 }}>
+                <Repeat size={18} color="var(--gold)" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Resume with monthly autopay</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                    Your payment sets up a Razorpay mandate. After the first charge, the same amount auto-deducts every month until you cancel.
+                  </div>
+                </div>
               </div>
             )}
 
@@ -608,58 +752,31 @@ export default function Subscribe() {
           </div>
         )}
 
-        {/* Payment methods (India) */}
-        <div className="font-serif" style={{ fontSize: 18, marginTop: 28, marginBottom: 12 }}>
-          Choose payment method
-        </div>
-        <div className="payment-grid" data-testid="payment-grid">
-          {PAYMENT_METHODS.map((m) => {
-            return (
-              <button
-                key={m.key}
-                type="button"
-                className={`payment-card ${method === m.key ? "selected" : ""}`}
-                onClick={() => setMethod(m.key)}
-                data-testid={`pay-method-${m.key}`}
-              >
-                {method === m.key && (
-                  <div className="payment-tick">
-                    <Check size={12} />
-                  </div>
-                )}
-                <div className="payment-card-label">{m.label}</div>
-                <div className="payment-card-note">{m.note}</div>
-                {m.marks && (
-                  <div className="pay-marks" data-testid={`pay-marks-${m.key}`}>
-                    {m.marks.map((Mark, i) => (
-                      <Mark key={i} />
-                    ))}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
         <button
           className="submit-btn"
           onClick={onSubscribe}
-          disabled={paying}
+          disabled={paying || (isUpgradeIntent && !prorate)}
           data-testid="subscribe-btn"
-          style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 22 }}
+          style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 28 }}
         >
           {paying
             ? "Processing…"
-            : hasActive
-              ? (isChangeRequest
-                  ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
-                  : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
-              : isExpired
-                ? `Pay & Resume · ${fmtRupee(pricing?.total_with_tax)} /mo`
-                : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
+            : isUpgradeIntent && !prorate
+              ? "Calculating upgrade price…"
+              : isProratedUpgrade
+                ? `Pay ${fmtRupee(prorate.total_with_tax)} · unlock ${tables} tables`
+                : isUpgradeNow
+                  ? `Pay ${fmtRupee(prorate.total_with_tax)} · unlock ${tables} tables`
+                  : hasActive
+                    ? (isChangeRequest
+                        ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
+                        : `Manage plan · ${fmtRupee(pricing?.total_with_tax)}/mo`)
+                    : isExpired
+                      ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`
+                      : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
-          <ShieldCheck size={12} /> Secured by 256-bit SSL · PCI DSS · UPI Autopay
+          <ShieldCheck size={12} /> Secured by Razorpay · Monthly mandate / UPI Autopay · Cancel anytime
         </div>
       </div>
 
@@ -668,6 +785,56 @@ export default function Subscribe() {
         onCancel={() => setShowLogout(false)}
         onConfirm={handleLogout}
       />
+
+      {payResult && (
+        <div
+          className="pay-result-overlay"
+          data-testid="pay-result-modal"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              const go = payResult.goManager;
+              setPayResult(null);
+              if (go) navigate("/manager");
+            }
+          }}
+        >
+          <div className={`pay-result-card ${payResult.ok ? "ok" : "fail"}`}>
+            <button
+              type="button"
+              className="pay-result-close"
+              aria-label="Close"
+              onClick={() => {
+                const go = payResult.goManager;
+                setPayResult(null);
+                if (go) navigate("/manager");
+              }}
+            >
+              <X size={18} />
+            </button>
+            <div className="pay-result-icon">
+              {payResult.ok ? <CheckCircle2 size={48} /> : <XCircle size={48} />}
+            </div>
+            <div className="pay-result-title">{payResult.title}</div>
+            <div className="pay-result-msg">{payResult.message}</div>
+            {payResult.detail && <div className="pay-result-detail">{payResult.detail}</div>}
+            <button
+              type="button"
+              className="submit-btn"
+              style={{ width: "100%", marginTop: 18, padding: "12px 16px" }}
+              data-testid="pay-result-ok"
+              onClick={() => {
+                const go = payResult.goManager;
+                setPayResult(null);
+                if (go) navigate("/manager");
+              }}
+            >
+              {payResult.ok ? "Continue to Manager" : "OK"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
