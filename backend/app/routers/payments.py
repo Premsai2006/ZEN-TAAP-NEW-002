@@ -157,43 +157,70 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
     """Verify first/recurring subscription payment signature and activate access."""
     if not razorpay_configured():
         raise HTTPException(status_code=503, detail="Online payments are not configured.")
-    if not body.razorpay_signature or not body.razorpay_subscription_id or not body.razorpay_payment_id:
+    if not body.razorpay_subscription_id or not body.razorpay_payment_id:
         raise HTTPException(status_code=400, detail="Incomplete subscription payment details.")
-
-    try:
-        verify_subscription_signature(
-            razorpay_subscription_id=body.razorpay_subscription_id,
-            razorpay_payment_id=body.razorpay_payment_id,
-            razorpay_signature=body.razorpay_signature,
-        )
-    except Exception:
-        raise HTTPException(status_code=400, detail="Subscription payment could not be verified.")
 
     rid = sess["restaurant_id"]
     doc = await rest_svc.require_restaurant_id(rid)
-    if doc.get("razorpay_subscription_id") and doc["razorpay_subscription_id"] != body.razorpay_subscription_id:
+    known_subs = {
+        s for s in (
+            doc.get("razorpay_subscription_id"),
+            doc.get("pending_checkout_subscription_id"),
+        ) if s
+    }
+    if known_subs and body.razorpay_subscription_id not in known_subs:
         raise HTTPException(status_code=400, detail="Subscription does not match this account.")
+
+    signature_ok = False
+    if body.razorpay_signature:
+        try:
+            verify_subscription_signature(
+                razorpay_subscription_id=body.razorpay_subscription_id,
+                razorpay_payment_id=body.razorpay_payment_id,
+                razorpay_signature=body.razorpay_signature,
+            )
+            signature_ok = True
+        except Exception as exc:
+            logger.warning(
+                "Subscription signature verify failed (will try payment.fetch fallback): %s",
+                exc,
+            )
 
     amount_paise = doc.get("pending_checkout_amount_paise")
     tables = doc.get("pending_checkout_tables") or doc.get("subscription_tables")
     payment_kind = doc.get("pending_checkout_kind") or "monthly_mandate"
     preserve_cycle = bool(doc.get("pending_checkout_preserve_cycle"))
     next_cycle_keep = doc.get("pending_checkout_next_cycle")
-    # Mid-cycle upgrade auth OR already-active account → keep cycle dates
     already_active = str(doc.get("subscription_status") or "").lower() == "active"
     keep_cycle = preserve_cycle or (already_active and payment_kind == "upgrade_proration")
 
     client = razorpay_client()
+    pay = None
     if client:
         try:
             pay = client.payment.fetch(body.razorpay_payment_id)
-            if str(pay.get("status", "")).lower() not in ("captured", "authorized"):
+            pay_status = str(pay.get("status", "")).lower()
+            if pay_status not in ("captured", "authorized"):
                 raise HTTPException(status_code=400, detail="Payment is not completed yet.")
             amount_paise = pay.get("amount", amount_paise)
+            pay_sub = (pay.get("subscription_id") or "").strip()
+            if pay_sub and pay_sub != body.razorpay_subscription_id:
+                raise HTTPException(status_code=400, detail="Payment does not belong to this subscription.")
         except HTTPException:
             raise
         except Exception as exc:
             logger.warning("payment.fetch failed after subscription verify: %s", exc)
+            pay = None
+
+    # Signature missing/wrong but Razorpay confirms captured payment for this sub → still activate
+    if not signature_ok:
+        if not pay or str(pay.get("status", "")).lower() not in ("captured", "authorized"):
+            raise HTTPException(status_code=400, detail="Subscription payment could not be verified.")
+        logger.info(
+            "Activated via payment.fetch fallback restaurant=%s payment=%s",
+            rid,
+            body.razorpay_payment_id,
+        )
 
     updated = await activate_paid_subscription(
         rid,
@@ -368,7 +395,15 @@ async def razorpay_webhook(request: Request):
         amount = entity.get("amount")
 
         if not rid and sub_id:
-            doc = await db.restaurants.find_one({"razorpay_subscription_id": sub_id}, {"_id": 0, "id": 1})
+            doc = await db.restaurants.find_one(
+                {
+                    "$or": [
+                        {"razorpay_subscription_id": sub_id},
+                        {"pending_checkout_subscription_id": sub_id},
+                    ]
+                },
+                {"_id": 0, "id": 1},
+            )
             rid = doc.get("id") if doc else None
 
         if rid:
@@ -432,7 +467,15 @@ async def razorpay_webhook(request: Request):
         sub_id = entity.get("id") if event.startswith("subscription.") else entity.get("subscription_id")
         rid = notes.get("restaurant_id")
         if not rid and sub_id:
-            doc = await db.restaurants.find_one({"razorpay_subscription_id": sub_id}, {"_id": 0, "id": 1})
+            doc = await db.restaurants.find_one(
+                {
+                    "$or": [
+                        {"razorpay_subscription_id": sub_id},
+                        {"pending_checkout_subscription_id": sub_id},
+                    ]
+                },
+                {"_id": 0, "id": 1},
+            )
             rid = doc.get("id") if doc else None
         if rid:
             updates = {"payment_status": "failed"}

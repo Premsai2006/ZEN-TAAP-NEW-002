@@ -249,7 +249,7 @@ export default function Subscribe() {
             } else {
               showPayResult({
                 ok: true,
-                title: "Autopay mandate active!",
+                title: "Payment successful!",
                 message: verified?.message
                   || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
                 detail: verified?.next_cycle_start
@@ -259,10 +259,24 @@ export default function Subscribe() {
               });
             }
           } catch (err) {
+            // Rare race: webhook may activate before verify returns — re-check status
+            try {
+              const { data: sub } = await api.get("/subscription");
+              if (sub && ["trial", "active"].includes(sub.status)) {
+                showPayResult({
+                  ok: true,
+                  title: "Payment successful!",
+                  message: "Your subscription is active. Autopay is set for monthly renewals.",
+                  detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
+                  goManager: true,
+                });
+                return;
+              }
+            } catch { /* ignore */ }
             showPayResult({
               ok: false,
               title: "Payment confirmation failed",
-              message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, contact support with your payment ID."),
+              message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, refresh this page — access often unlocks within a few seconds."),
               detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
             });
           }
@@ -575,14 +589,14 @@ export default function Subscribe() {
                 </div>
                 {!hasActive && (
                   <div className="qr-paywall-overlay" data-testid="subscribe-qr-paywall">
-                    <Lock size={28} color="var(--gold)" />
+                    <Lock size={28} className="qr-paywall-icon" color="#000" />
                     <div className="qr-paywall-title">
                       {isExpired ? "Pay to unlock" : "Subscribe to unlock"}
                     </div>
                     <div className="qr-paywall-sub">
                       {isExpired
-                        ? "Renew below to download and print sharp QR codes for every table."
-                        : "Complete payment or start a trial to download your table QRs."}
+                        ? "Renew your subscription first, then download clear table QRs."
+                        : "Complete payment or start a trial to download clear table QRs."}
                     </div>
                   </div>
                 )}

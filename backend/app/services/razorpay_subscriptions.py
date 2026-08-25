@@ -379,10 +379,14 @@ def verify_subscription_signature(
     razorpay_payment_id: str,
     razorpay_signature: str,
 ) -> None:
+    """
+    Razorpay subscription checkout signs: payment_id|subscription_id
+    (NOT order_id|payment_id — that is only for Orders API).
+    """
     client = razorpay_client()
     if not client:
         raise RuntimeError("Razorpay is not configured")
-    client.utility.verify_payment_signature(
+    client.utility.verify_subscription_payment_signature(
         {
             "razorpay_subscription_id": razorpay_subscription_id,
             "razorpay_payment_id": razorpay_payment_id,

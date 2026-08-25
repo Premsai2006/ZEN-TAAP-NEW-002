@@ -56,7 +56,7 @@ export default function TablesSection({
   const requireUnlock = () => {
     toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
       description: isExpired
-        ? "Renew your subscription to download and print table QRs."
+        ? "Renew your subscription first, then download clear table QRs."
         : "Start a trial or subscribe to download table QRs.",
       id: "qr-locked",
     });
@@ -267,18 +267,18 @@ export default function TablesSection({
             </div>
             {qrLocked && (
               <div className="qr-paywall-overlay" data-testid="tables-qr-paywall">
-                <Lock size={28} color="var(--gold)" />
+                <Lock size={28} className="qr-paywall-icon" color="#000" />
                 <div className="qr-paywall-title">
                   {isExpired ? "Pay to unlock" : "Subscribe to unlock"}
                 </div>
                 <div className="qr-paywall-sub">
                   {isExpired
-                    ? "Your subscription expired. Renew to download and print clear table QRs."
-                    : "Start a trial or subscribe to download sharp QR codes for every table."}
+                    ? "Renew your subscription first, then download clear table QRs."
+                    : "Start a trial or subscribe to download clear table QRs."}
                 </div>
                 <button
                   type="button"
-                  className="explore-banner-cta"
+                  className="qr-paywall-cta"
                   onClick={() => navigate("/subscribe")}
                   data-testid="tables-qr-unlock-btn"
                 >
