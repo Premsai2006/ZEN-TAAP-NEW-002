@@ -14,6 +14,20 @@ const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const Admin = lazy(() => import("@/pages/Admin"));
 const AdminLogin = lazy(() => import("@/pages/AdminLogin"));
 
+function storedDashboardPath() {
+  try {
+    if (localStorage.getItem("mgr_token")) return "/manager";
+    if (localStorage.getItem("kitchen_token")) {
+      const slug = (localStorage.getItem("kitchen_slug") || "").trim().toLowerCase();
+      return slug ? `/kitchen/${slug}` : "/kitchen";
+    }
+    if (localStorage.getItem("admin_token")) return "/admin";
+  } catch {
+    /* private mode */
+  }
+  return null;
+}
+
 function RequireAuth({ children }) {
   const token = localStorage.getItem("mgr_token");
   if (!token) return <Navigate to="/login" replace />;
@@ -24,6 +38,25 @@ function RequireAdmin({ children }) {
   const token = localStorage.getItem("admin_token");
   if (!token) return <Navigate to="/admin/login" replace />;
   return children;
+}
+
+function RedirectIfSignedIn({ children }) {
+  const to = storedDashboardPath();
+  if (to) return <Navigate to={to} replace />;
+  return children;
+}
+
+function RedirectIfAdminSignedIn({ children }) {
+  try {
+    if (localStorage.getItem("admin_token")) return <Navigate to="/admin" replace />;
+  } catch {
+    /* private mode */
+  }
+  return children;
+}
+
+function HomeRedirect() {
+  return <Navigate to={storedDashboardPath() || "/login"} replace />;
 }
 
 function LazyFallback() {
@@ -43,8 +76,8 @@ function App() {
     <div className="App">
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="/login" element={<RedirectIfSignedIn><Login /></RedirectIfSignedIn>} />
           <Route path="/signup" element={<Signup />} />
           <Route
             path="/subscribe"
@@ -71,9 +104,11 @@ function App() {
           <Route
             path="/admin/login"
             element={
-              <Suspense fallback={<LazyFallback />}>
-                <AdminLogin />
-              </Suspense>
+              <RedirectIfAdminSignedIn>
+                <Suspense fallback={<LazyFallback />}>
+                  <AdminLogin />
+                </Suspense>
+              </RedirectIfAdminSignedIn>
             }
           />
           <Route
