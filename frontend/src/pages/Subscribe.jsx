@@ -222,7 +222,7 @@ export default function Subscribe() {
         return;
       }
 
-      const useUpgradeOrder =
+      const isUpgrade =
         planResp.applied === "upgrade_proration" ||
         planResp.proration?.kind === "upgrade_proration" ||
         (existing?.status === "active" && tables > (existing?.tables || 0));
@@ -237,129 +237,26 @@ export default function Subscribe() {
         return;
       }
 
-      if (useUpgradeOrder) {
-        // Mid-cycle upgrade: one-time prorated order (keeps cycle end)
-        const { data: order } = await api.post("/payments/create-order", { tables });
-        const pr = order.proration || planResp.proration;
-        const isProrated = order.kind === "upgrade_proration" || pr?.kind === "upgrade_proration";
-        const payAmt = (order.amount || 0) / 100;
-        const desc = isProrated
-          ? `Upgrade to ${tables} tables · ${pr?.remaining_days || "?"} days left`
-          : `${tables} tables · unlock now`;
-
-        new window.Razorpay({
-          key: order.key_id,
-          amount: order.amount,
-          currency: order.currency,
-          name: "ZenTaap",
-          description: desc,
-          order_id: order.order_id,
-          theme: { color: "#e87d2f" },
-          prefill: { method },
-          notes: { tables: String(tables), kind: order.kind || "subscription" },
-          handler: async (resp) => {
-            try {
-              const { data: verified } = await api.post("/payments/verify", {
-                razorpay_order_id: resp.razorpay_order_id,
-                razorpay_payment_id: resp.razorpay_payment_id,
-                razorpay_signature: resp.razorpay_signature,
-                enable_autopay: false,
-              });
-              const paid = verified?.amount_paise != null
-                ? fmtRupee(verified.amount_paise / 100)
-                : fmtRupee(payAmt);
-
-              const mu = verified?.mandate_upgrade;
-              if (mu?.needs_checkout && mu.subscription_id) {
-                // UPI can't raise mandate max silently — authorize new 20-table autopay for next cycle
-                new window.Razorpay({
-                  key: verified.key_id || order.key_id,
-                  subscription_id: mu.subscription_id,
-                  name: "ZenTaap",
-                  description: mu.description || `Authorize ${tables}-table monthly autopay`,
-                  theme: { color: "#e87d2f" },
-                  notes: { tables: String(tables), kind: "monthly_mandate" },
-                  handler: async (subResp) => {
-                    try {
-                      const { data: subVerified } = await api.post("/payments/verify-subscription", {
-                        razorpay_subscription_id: subResp.razorpay_subscription_id,
-                        razorpay_payment_id: subResp.razorpay_payment_id,
-                        razorpay_signature: subResp.razorpay_signature,
-                      });
-                      showPayResult({
-                        ok: true,
-                        title: "Upgrade + autopay updated!",
-                        message: `All ${verified?.tables || tables} tables are unlocked. You paid ${paid} for days left.`,
-                        detail: subVerified?.next_cycle_start
-                          ? `From ${fmtDate(mu.start_at ? new Date(mu.start_at * 1000).toISOString() : verified.next_cycle_start)} autopay will charge the full ${tables}-table plan.`
-                          : mu.message,
-                        goManager: true,
-                      });
-                    } catch (err) {
-                      showPayResult({
-                        ok: true,
-                        title: "Tables unlocked — finish autopay",
-                        message: `Upgrade paid (${paid}). Please open Subscription again to authorize the new monthly mandate for ${tables} tables.`,
-                        detail: friendlyError(err, "Mandate authorization incomplete."),
-                        goManager: true,
-                      });
-                    }
-                  },
-                  modal: {
-                    ondismiss: () =>
-                      showPayResult({
-                        ok: true,
-                        title: "Tables unlocked",
-                        message: `Upgrade paid (${paid}). Authorize the new ${tables}-table monthly mandate from Subscription when ready — otherwise next autopay may still be the old amount.`,
-                        goManager: true,
-                      }),
-                  },
-                }).open();
-                return;
-              }
-
-              showPayResult({
-                ok: true,
-                title: isProrated ? "Upgrade unlocked!" : "Payment successful!",
-                message: isProrated
-                  ? `All ${verified?.tables || tables} tables are active now. You paid ${paid} for the remaining days.`
-                  : `Your plan is active. Charged ${paid}.`,
-                detail: verified?.next_cycle_start
-                  ? `Next full billing on ${fmtDate(verified.next_cycle_start)} for ${verified?.tables || tables} tables.`
-                  : null,
-                goManager: true,
-              });
-            } catch (err) {
-              showPayResult({
-                ok: false,
-                title: "Payment confirmation failed",
-                message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, contact support with your payment ID."),
-                detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
-              });
-            }
-          },
-          modal: {
-            ondismiss: () =>
-              showPayResult({
-                ok: false,
-                title: "Payment cancelled",
-                message: "No charge was made. Your current tables stay as they are until you complete the upgrade payment.",
-              }),
-          },
-        }).open();
-        return;
-      }
-
-      // New / renew / trial→paid: Razorpay Subscription (monthly autopay mandate)
+      // Renew OR mid-cycle upgrade: always one Razorpay Subscription checkout
+      // Upgrade = proration addon now + new higher mandate (old mandate ends this cycle)
       const { data: checkout } = await api.post("/payments/create-subscription", { tables });
+      const pr = checkout.proration || planResp.proration;
+      const payAmt = (checkout.amount || 0) / 100;
       new window.Razorpay({
         key: checkout.key_id,
         subscription_id: checkout.subscription_id,
         name: "ZenTaap",
-        description: checkout.description || `${tables} tables · monthly autopay mandate`,
+        description:
+          checkout.description
+          || (isUpgrade
+            ? `Upgrade to ${tables} tables · pay remaining days + set monthly autopay`
+            : `${tables} tables · monthly autopay mandate`),
         theme: { color: "#e87d2f" },
         prefill: { method },
-        notes: { tables: String(tables), kind: "monthly_mandate" },
+        notes: {
+          tables: String(tables),
+          kind: checkout.upgrade ? "upgrade_proration" : "monthly_mandate",
+        },
         handler: async (resp) => {
           try {
             const { data: verified } = await api.post("/payments/verify-subscription", {
@@ -367,21 +264,36 @@ export default function Subscribe() {
               razorpay_payment_id: resp.razorpay_payment_id,
               razorpay_signature: resp.razorpay_signature,
             });
-            showPayResult({
-              ok: true,
-              title: "Autopay mandate active!",
-              message: verified?.message
-                || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
-              detail: verified?.next_cycle_start
-                ? `Next auto-debit on ${fmtDate(verified.next_cycle_start)} · ${tables} tables.`
-                : "You can turn autopay off anytime from Subscription.",
-              goManager: true,
-            });
+            const paid = verified?.amount_paise != null
+              ? fmtRupee(verified.amount_paise / 100)
+              : fmtRupee(payAmt);
+            if (checkout.upgrade || isUpgrade) {
+              showPayResult({
+                ok: true,
+                title: "Upgrade complete!",
+                message: `All ${verified?.tables || tables} tables are unlocked. Charged ${paid} for the days left.`,
+                detail: verified?.next_cycle_start
+                  ? `From ${fmtDate(verified.next_cycle_start)} autopay will deduct the full ${tables}-table plan automatically. Old mandate stopped.`
+                  : "Monthly autopay is set to the new table count.",
+                goManager: true,
+              });
+            } else {
+              showPayResult({
+                ok: true,
+                title: "Autopay mandate active!",
+                message: verified?.message
+                  || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
+                detail: verified?.next_cycle_start
+                  ? `Next auto-debit on ${fmtDate(verified.next_cycle_start)} · ${tables} tables.`
+                  : "You can turn autopay off anytime from Subscription.",
+                goManager: true,
+              });
+            }
           } catch (err) {
             showPayResult({
               ok: false,
-              title: "Mandate confirmation failed",
-              message: friendlyError(err, "We couldn't confirm your subscription. Please try again or contact support."),
+              title: "Payment confirmation failed",
+              message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, contact support with your payment ID."),
               detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
             });
           }
@@ -392,7 +304,7 @@ export default function Subscribe() {
               ok: false,
               title: "Payment cancelled",
               message: needsPay
-                ? "Payment cancelled — account stays locked until the monthly mandate is activated."
+                ? "Payment cancelled — nothing was charged. Your plan is unchanged."
                 : "Payment cancelled — you can set up autopay later from this page.",
             }),
         },

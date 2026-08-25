@@ -162,6 +162,127 @@ async def prepare_upgraded_mandate(
     }
 
 
+async def create_upgrade_subscription(
+    restaurant_id: str,
+    *,
+    tables: int,
+) -> Tuple[dict, dict]:
+    """
+    ONE checkout for mid-cycle upgrades:
+    - Addon = prorated difference for remaining days (charged now)
+    - Plan = full new table tier (mandate max), first charge at next_cycle_start
+    - Old subscription cancelled at cycle end (no double debit)
+    """
+    from app.services.pricing import compute_upgrade_proration
+    from app.services.subscription_access import parse_dt
+
+    client = razorpay_client()
+    if not client:
+        raise RuntimeError("Razorpay is not configured")
+
+    doc = await rest_svc.require_restaurant_id(restaurant_id)
+    current = int(doc.get("subscription_tables") or 0)
+    if tables <= current:
+        raise ValueError("New table count must be higher than current plan.")
+
+    prorate = compute_upgrade_proration(
+        current,
+        int(tables),
+        doc.get("next_cycle_start"),
+        restaurant=doc,
+    )
+    addon_paise = max(100, int(prorate["amount_paise"]))
+    next_cycle_iso = prorate.get("next_cycle_start") or doc.get("next_cycle_start")
+    preserve = bool(prorate.get("preserve_cycle"))
+
+    start_at = None
+    next_dt = parse_dt(next_cycle_iso)
+    if preserve and next_dt:
+        ts = int(next_dt.timestamp())
+        if ts > int(time.time()) + 120:
+            start_at = ts
+
+    old_sub = (doc.get("razorpay_subscription_id") or "").strip()
+    if old_sub:
+        # Stop old lower mandate after this cycle; new mandate takes over
+        await cancel_subscription_now(old_sub, at_cycle_end=True)
+
+    plan_id = await get_plan_id_for_restaurant(doc, int(tables))
+    customer_id = await ensure_customer(restaurant_id)
+    price = compute_price_for_restaurant(int(tables), doc)
+
+    extra = int(tables) - current
+    days = prorate.get("remaining_days") or "?"
+    payload = {
+        "plan_id": plan_id,
+        "customer_id": customer_id,
+        "customer_notify": 1,
+        "total_count": SUBSCRIPTION_TOTAL_COUNT,
+        "quantity": 1,
+        "addons": [
+            {
+                "item": {
+                    "name": f"Upgrade +{extra} tables ({days} days left)",
+                    "amount": addon_paise,
+                    "currency": "INR",
+                }
+            }
+        ],
+        "notes": {
+            "restaurant_id": restaurant_id,
+            "tables": str(int(tables)),
+            "kind": "upgrade_proration",
+            "preserve_cycle": "1" if preserve else "0",
+            "product": "zentaap",
+            "current_tables": str(current),
+            "addon_paise": str(addon_paise),
+        },
+    }
+    if start_at:
+        payload["start_at"] = start_at
+
+    sub = client.subscription.create(payload)
+
+    await rest_svc.update_restaurant(
+        restaurant_id,
+        {
+            "pending_checkout_tables": int(tables),
+            "pending_checkout_subscription_id": sub["id"],
+            "pending_checkout_amount_paise": addon_paise,
+            "pending_checkout_kind": "upgrade_proration",
+            "pending_checkout_preserve_cycle": preserve,
+            "pending_checkout_next_cycle": next_cycle_iso,
+            "razorpay_subscription_id": sub["id"],
+            "razorpay_plan_id": plan_id,
+            "pending_razorpay_plan_tables": int(tables),
+        },
+    )
+
+    checkout = {
+        "mode": "subscription",
+        "subscription_id": sub["id"],
+        "plan_id": plan_id,
+        "amount": addon_paise,
+        "currency": "INR",
+        "customer_id": customer_id,
+        "short_url": sub.get("short_url"),
+        "status": sub.get("status"),
+        "restaurant_id": restaurant_id,
+        "tables": int(tables),
+        "mandate": True,
+        "autopay": True,
+        "upgrade": True,
+        "proration": prorate,
+        "monthly_amount_paise": int(price["amount_paise"]),
+        "start_at": start_at,
+        "description": (
+            f"Pay {addon_paise/100:.0f} for +{extra} tables now · "
+            f"then {price['total_with_tax']:.0f}/mo from next cycle"
+        ),
+    }
+    return checkout, sub
+
+
 async def create_checkout_subscription(
     restaurant_id: str,
     *,
