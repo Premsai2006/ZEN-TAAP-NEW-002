@@ -121,8 +121,11 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     - expired → stash plan intent; stays expired until /payments/verify
     - active mid-cycle table change → pending until next cycle (no free upgrade)
     """
-    if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
-        raise HTTPException(status_code=400, detail="Please choose a valid payment option.")
+    # Razorpay Checkout handles method selection; keep a loose label for records.
+    pay_method = (body.payment_method or "razorpay").strip().lower() or "razorpay"
+    if pay_method not in ("card", "upi", "netbanking", "wallet", "razorpay"):
+        pay_method = "razorpay"
+    body.payment_method = pay_method
     now = datetime.now(timezone.utc)
     existing, current_status = await refresh_subscription_status(sess["restaurant_id"])
     price = compute_price_for_restaurant(body.tables, existing)

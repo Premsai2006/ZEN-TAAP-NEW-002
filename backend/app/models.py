@@ -184,7 +184,8 @@ class ImageUploadRequest(BaseModel):
 
 class SubscribeBody(BaseModel):
     tables: int
-    payment_method: str
+    # Optional — Razorpay Checkout lets the customer pick UPI/card/etc.
+    payment_method: Optional[str] = "razorpay"
 
 
 class RazorpayOrderBody(BaseModel):

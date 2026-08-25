@@ -127,6 +127,54 @@
   padding: 14px 12px;
 }
 
+/* Blurred QR paywall (expired / no subscription) */
+.qr-locked-wrap {
+  position: relative;
+  border-radius: 14px;
+}
+.qr-locked-wrap.is-locked {
+  min-height: 220px;
+}
+.qr-locked-blur {
+  filter: blur(7px);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+  transform: scale(1.01);
+}
+.qr-paywall-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 18px;
+  text-align: center;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    rgba(22, 19, 16, 0.28) 0%,
+    rgba(22, 19, 16, 0.55) 100%
+  );
+  border: 1px solid rgba(232, 125, 47, 0.35);
+}
+.qr-paywall-title {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+.qr-paywall-sub {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 320px;
+}
+
 /* Autopay card */
 .autopay-card {
   display: flex;

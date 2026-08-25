@@ -133,7 +133,12 @@ export default function Manager() {
   const locked = subscription && !["trial", "active"].includes(subStatus);
 
   useEffect(() => {
-    if (subscription?.status === "expired" && !["profile", "settings"].includes(active)) {
+    // Expired: allow Tables (blurred QRs + pay to unlock), Profile, Settings.
+    // Other tabs still bounce to Subscribe so they renew first.
+    if (
+      subscription?.status === "expired" &&
+      !["profile", "settings", "tables"].includes(active)
+    ) {
       navigate("/subscribe", { replace: true });
     }
   }, [subscription?.status, active, navigate]);
@@ -239,8 +244,8 @@ export default function Manager() {
                   </>
                 )}
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }} data-testid="feature-lock-matrix">
-                  <b>Blocked without subscription:</b> placing/updating orders, generating bills, adding/editing menu items &amp; categories, and sales analytics APIs.
-                  {" "}Profile &amp; Settings stay available.
+                  <b>Blocked without subscription:</b> placing/updating orders, generating bills, adding/editing menu items &amp; categories, sales analytics, and downloading clear table QRs.
+                  {" "}Profile &amp; Settings stay available. Tables show blurred QRs — pay to unlock.
                 </div>
               </div>
             </div>
@@ -273,6 +278,7 @@ export default function Manager() {
             subscription={subscription}
             slug={restaurantSlug}
             restaurantName={settings?.restaurant_name}
+            locked={locked}
           />
         )}
         {active === "menu" && (

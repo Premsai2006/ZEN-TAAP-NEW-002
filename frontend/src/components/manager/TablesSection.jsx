@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, QrCode, Link2 } from "lucide-react";
+import { Download, QrCode, Link2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { restaurantOrderUrl } from "@/lib/qr";
 import {
@@ -10,7 +11,14 @@ import {
   triggerBlobDownload,
 } from "@/lib/qrDownload";
 
-export default function TablesSection({ orders, subscription, slug: slugProp, restaurantName }) {
+export default function TablesSection({
+  orders,
+  subscription,
+  slug: slugProp,
+  restaurantName,
+  locked = false,
+}) {
+  const navigate = useNavigate();
   const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
   const tableCount = useMemo(() => {
     // Total tables come from the active subscription; fall back to 15 for unsubscribed/explore mode.
@@ -18,6 +26,9 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
     if (Number.isFinite(t) && t > 0) return t;
     return 15;
   }, [subscription]);
+
+  const qrLocked = Boolean(locked);
+  const isExpired = subscription?.status === "expired";
 
   const tableMap = {};
   for (const o of orders || []) {
@@ -30,6 +41,11 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
   const [zipping, setZipping] = useState(false);
   const qrPrintRef = useRef(null);
 
+  // When locked/expired, open the gallery so the paywall is visible.
+  useEffect(() => {
+    if (qrLocked) setShowQRs(true);
+  }, [qrLocked]);
+
   const tableNums = useMemo(
     () => Array.from({ length: tableCount }, (_, i) => i + 1),
     [tableCount]
@@ -37,7 +53,18 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
 
   const getQrSvg = (n) => document.querySelector(`[data-qr-svg="${n}"] svg`);
 
+  const requireUnlock = () => {
+    toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
+      description: isExpired
+        ? "Renew your subscription to download and print table QRs."
+        : "Start a trial or subscribe to download table QRs.",
+      id: "qr-locked",
+    });
+    navigate("/subscribe");
+  };
+
   const downloadOneQR = async (n) => {
+    if (qrLocked) return requireUnlock();
     const el = getQrSvg(n);
     if (!el) return toast.error("QR code isn't ready yet. Please try again.");
     try {
@@ -50,6 +77,7 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
   };
 
   const downloadAllQRs = async () => {
+    if (qrLocked) return requireUnlock();
     if (!slug) {
       return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
     }
@@ -71,6 +99,7 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
   };
 
   const copyLink = async (n) => {
+    if (qrLocked) return requireUnlock();
     const url = restaurantOrderUrl(slug, n);
     try {
       await navigator.clipboard.writeText(url);
@@ -139,11 +168,11 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
             onClick={downloadAllQRs}
             className="mini-btn"
             data-testid="download-all-qr-btn"
-            disabled={zipping || !slug}
+            disabled={zipping || (!slug && !qrLocked)}
             style={{ borderColor: "var(--gold)", color: "var(--gold)" }}
           >
             <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-            {zipping ? "Preparing ZIP…" : "Download all QRs"}
+            {zipping ? "Preparing ZIP…" : qrLocked ? "Pay to unlock" : "Download all QRs"}
           </button>
         </div>
       </div>
@@ -176,62 +205,87 @@ export default function TablesSection({ orders, subscription, slug: slugProp, re
               Restaurant URL is missing. Go to Profile and set it, then come back to generate linked QRs.
             </div>
           )}
-          <div className="tables-qr-grid">
-            {tableNums.map((n) => {
-              const url = restaurantOrderUrl(slug, n);
-              return (
-                <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
-                  <div style={{ background: "white", padding: 8, borderRadius: 8 }}>
-                    <QRCodeSVG
-                      value={url}
-                      size={120}
-                      bgColor="#ffffff"
-                      fgColor="#161310"
-                      level="M"
-                    />
-                  </div>
-                  <div style={{ marginTop: 8, fontWeight: 700 }}>Table {n}</div>
-                  <div
-                    data-testid={`table-qr-url-${n}`}
-                    title={url}
-                    style={{
-                      marginTop: 4,
-                      fontSize: 10,
-                      color: "var(--muted)",
-                      wordBreak: "break-all",
-                      lineHeight: 1.3,
-                      maxWidth: 160,
-                    }}
-                  >
-                    {slug ? `?table=${n}` : "no slug"}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      onClick={() => downloadOneQR(n)}
-                      className="mini-btn"
-                      data-testid={`download-qr-${n}`}
-                      style={{ fontSize: 11 }}
-                      disabled={!slug}
-                    >
-                      <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                      Download
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => copyLink(n)}
-                      className="mini-btn"
-                      data-testid={`copy-qr-link-${n}`}
-                      style={{ fontSize: 11 }}
-                      disabled={!slug}
-                    >
-                      <Link2 size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                      Copy link
-                    </button>
-                  </div>
+          <div className={`qr-locked-wrap${qrLocked ? " is-locked" : ""}`} data-testid="tables-qr-locked-wrap">
+            <div className={qrLocked ? "qr-locked-blur" : undefined}>
+              <div className="tables-qr-grid">
+                {tableNums.map((n) => {
+                  const url = restaurantOrderUrl(slug, n);
+                  return (
+                    <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
+                      <div style={{ background: "white", padding: 8, borderRadius: 8 }}>
+                        <QRCodeSVG
+                          value={url}
+                          size={120}
+                          bgColor="#ffffff"
+                          fgColor="#161310"
+                          level="M"
+                        />
+                      </div>
+                      <div style={{ marginTop: 8, fontWeight: 700 }}>Table {n}</div>
+                      <div
+                        data-testid={`table-qr-url-${n}`}
+                        title={url}
+                        style={{
+                          marginTop: 4,
+                          fontSize: 10,
+                          color: "var(--muted)",
+                          wordBreak: "break-all",
+                          lineHeight: 1.3,
+                          maxWidth: 160,
+                        }}
+                      >
+                        {slug ? `?table=${n}` : "no slug"}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => downloadOneQR(n)}
+                          className="mini-btn"
+                          data-testid={`download-qr-${n}`}
+                          style={{ fontSize: 11 }}
+                          disabled={!slug && !qrLocked}
+                        >
+                          <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+                          Download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copyLink(n)}
+                          className="mini-btn"
+                          data-testid={`copy-qr-link-${n}`}
+                          style={{ fontSize: 11 }}
+                          disabled={!slug && !qrLocked}
+                        >
+                          <Link2 size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+                          Copy link
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {qrLocked && (
+              <div className="qr-paywall-overlay" data-testid="tables-qr-paywall">
+                <Lock size={28} color="var(--gold)" />
+                <div className="qr-paywall-title">
+                  {isExpired ? "Pay to unlock" : "Subscribe to unlock"}
                 </div>
-              );
-            })}
+                <div className="qr-paywall-sub">
+                  {isExpired
+                    ? "Your subscription expired. Renew to download and print clear table QRs."
+                    : "Start a trial or subscribe to download sharp QR codes for every table."}
+                </div>
+                <button
+                  type="button"
+                  className="explore-banner-cta"
+                  onClick={() => navigate("/subscribe")}
+                  data-testid="tables-qr-unlock-btn"
+                >
+                  {isExpired ? "Pay & Resume" : "Unlock QRs"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

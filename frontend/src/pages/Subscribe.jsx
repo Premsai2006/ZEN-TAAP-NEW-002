@@ -2,17 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download, X, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, Calculator, FileText, RefreshCw, QrCode, Repeat, Download, X, CheckCircle2, XCircle, Lock } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
 import { downloadAllQrsZip } from "@/lib/qrDownload";
-import {
-  GPayMark, PhonePeMark, PaytmMark, BHIMMark,
-  VisaMark, MastercardMark, RuPayMark,
-  HDFCMark, ICICIMark, SBIMark, AxisMark,
-  AmazonPayMark, FreechargeMark, MobikwikMark,
-} from "@/components/subscribe/BrandLogos";
 
 const MIN_T = 10;
 const MAX_T = 60;
@@ -22,43 +16,11 @@ const fmtDate = (iso) => {
   try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
 };
 
-const PAYMENT_METHODS = [
-  {
-    key: "upi",
-    label: "UPI",
-    icon: Smartphone,
-    note: "GPay · PhonePe · Paytm · BHIM",
-    marks: [GPayMark, PhonePeMark, PaytmMark, BHIMMark],
-  },
-  {
-    key: "card",
-    label: "Credit / Debit Card",
-    icon: CreditCard,
-    note: "VISA · MasterCard · RuPay",
-    marks: [VisaMark, MastercardMark, RuPayMark],
-  },
-  {
-    key: "netbanking",
-    label: "Net Banking",
-    icon: Building2,
-    note: "HDFC · ICICI · SBI · Axis",
-    marks: [HDFCMark, ICICIMark, SBIMark, AxisMark],
-  },
-  {
-    key: "wallet",
-    label: "Wallets",
-    icon: Wallet,
-    note: "Amazon Pay · Freecharge · MobiKwik · Paytm",
-    marks: [AmazonPayMark, FreechargeMark, MobikwikMark, PaytmMark],
-  },
-];
-
 export default function Subscribe() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("calc");
   const [tables, setTables] = useState(14);
   const [pricing, setPricing] = useState(null);
-  const [method, setMethod] = useState("upi");
   const [paying, setPaying] = useState(false);
   const [existing, setExisting] = useState(null);
   const [zippingQrs, setZippingQrs] = useState(false);
@@ -82,7 +44,6 @@ export default function Subscribe() {
       .then((r) => {
         setExisting(r.data);
         if (r.data?.tables) setTables(r.data.tables);
-        if (r.data?.payment_method) setMethod(r.data.payment_method);
       })
       .catch(() => {});
   }, []);
@@ -162,6 +123,15 @@ export default function Subscribe() {
     });
 
   const downloadSubscribeQRs = async () => {
+    if (!hasActive) {
+      toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
+        description: isExpired
+          ? "Renew your subscription first, then download clear table QRs."
+          : "Complete payment or start a trial to download QRs.",
+        id: "sub-qr-locked",
+      });
+      return;
+    }
     const slug = (localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
     if (!slug) {
       return toast.error("Set your restaurant URL in Profile first — QR codes need it to link tables.");
@@ -192,7 +162,7 @@ export default function Subscribe() {
     if (!pricing) return;
     setPaying(true);
     try {
-      const { data: planResp } = await api.post("/subscription", { tables, payment_method: method });
+      const { data: planResp } = await api.post("/subscription", { tables });
 
       if (planResp.applied === "next_cycle") {
         toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
@@ -200,7 +170,7 @@ export default function Subscribe() {
         return;
       }
       if (planResp.applied === "no_change") {
-        toast.success("Payment method updated");
+        toast.success("You're already on this plan");
         navigate("/manager");
         return;
       }
@@ -252,7 +222,6 @@ export default function Subscribe() {
             ? `Upgrade to ${tables} tables · pay remaining days + set monthly autopay`
             : `${tables} tables · monthly autopay mandate`),
         theme: { color: "#e87d2f" },
-        prefill: { method },
         notes: {
           tables: String(tables),
           kind: checkout.upgrade ? "upgrade_proration" : "monthly_mandate",
@@ -542,7 +511,7 @@ export default function Subscribe() {
               </div>
             </div>
 
-            {/* QR codes preview — one QR per table */}
+            {/* QR codes preview — one QR per table (blurred until paid) */}
             <div className="qr-preview-card" data-testid="qr-preview-card">
               <div className="qr-preview-header">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -550,7 +519,11 @@ export default function Subscribe() {
                   <div>
                     <div className="font-serif" style={{ fontSize: 18 }}>Your {tables} QR codes</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      One QR per table. Download, laminate &amp; place on each table.
+                      {hasActive
+                        ? "One QR per table. Download, laminate & place on each table."
+                        : isExpired
+                          ? "Subscription expired — pay to unlock clear downloadable QRs."
+                          : "Pay or start a trial to unlock clear downloadable QRs."}
                     </div>
                   </div>
                 </div>
@@ -562,28 +535,55 @@ export default function Subscribe() {
                   disabled={zippingQrs}
                   style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
                 >
-                  <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-                  {zippingQrs ? "Preparing ZIP…" : "Download QRs"}
+                  {hasActive ? (
+                    <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  ) : (
+                    <Lock size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                  )}
+                  {zippingQrs
+                    ? "Preparing ZIP…"
+                    : hasActive
+                      ? "Download QRs"
+                      : isExpired
+                        ? "Pay to unlock"
+                        : "Unlock QRs"}
                 </button>
               </div>
-              <div className="qr-grid" data-testid="qr-grid">
-                {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
-                  <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
-                    <QRCodeSVG
-                      value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
-                      size={84}
-                      bgColor="#ffffff"
-                      fgColor="#161310"
-                      level="M"
-                      includeMargin={false}
-                    />
-                    <div className="qr-tile-label">Table {n}</div>
+              <div className={`qr-locked-wrap${!hasActive ? " is-locked" : ""}`} data-testid="subscribe-qr-locked-wrap">
+                <div className={!hasActive ? "qr-locked-blur" : undefined}>
+                  <div className="qr-grid" data-testid="qr-grid">
+                    {Array.from({ length: Math.min(tables, 12) }, (_, i) => i + 1).map((n) => (
+                      <div key={n} className="qr-tile" data-testid={`qr-tile-${n}`}>
+                        <QRCodeSVG
+                          value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
+                          size={84}
+                          bgColor="#ffffff"
+                          fgColor="#161310"
+                          level="M"
+                          includeMargin={false}
+                        />
+                        <div className="qr-tile-label">Table {n}</div>
+                      </div>
+                    ))}
+                    {tables > 12 && (
+                      <div className="qr-tile qr-tile-more" data-testid="qr-tile-more">
+                        <div className="qr-more-num">+{tables - 12}</div>
+                        <div className="qr-tile-label">more</div>
+                      </div>
+                    )}
                   </div>
-                ))}
-                {tables > 12 && (
-                  <div className="qr-tile qr-tile-more" data-testid="qr-tile-more">
-                    <div className="qr-more-num">+{tables - 12}</div>
-                    <div className="qr-tile-label">more</div>
+                </div>
+                {!hasActive && (
+                  <div className="qr-paywall-overlay" data-testid="subscribe-qr-paywall">
+                    <Lock size={28} color="var(--gold)" />
+                    <div className="qr-paywall-title">
+                      {isExpired ? "Pay to unlock" : "Subscribe to unlock"}
+                    </div>
+                    <div className="qr-paywall-sub">
+                      {isExpired
+                        ? "Renew below to download and print sharp QR codes for every table."
+                        : "Complete payment or start a trial to download your table QRs."}
+                    </div>
                   </div>
                 )}
               </div>
@@ -690,60 +690,27 @@ export default function Subscribe() {
           </div>
         )}
 
-        {/* Payment methods (India) */}
-        <div className="font-serif" style={{ fontSize: 18, marginTop: 28, marginBottom: 12 }}>
-          Choose payment method
-        </div>
-        <div className="payment-grid" data-testid="payment-grid">
-          {PAYMENT_METHODS.map((m) => {
-            return (
-              <button
-                key={m.key}
-                type="button"
-                className={`payment-card ${method === m.key ? "selected" : ""}`}
-                onClick={() => setMethod(m.key)}
-                data-testid={`pay-method-${m.key}`}
-              >
-                {method === m.key && (
-                  <div className="payment-tick">
-                    <Check size={12} />
-                  </div>
-                )}
-                <div className="payment-card-label">{m.label}</div>
-                <div className="payment-card-note">{m.note}</div>
-                {m.marks && (
-                  <div className="pay-marks" data-testid={`pay-marks-${m.key}`}>
-                    {m.marks.map((Mark, i) => (
-                      <Mark key={i} />
-                    ))}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
         <button
           className="submit-btn"
           onClick={onSubscribe}
           disabled={paying || (isUpgradeIntent && !prorate)}
           data-testid="subscribe-btn"
-          style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 22 }}
+          style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 28 }}
         >
           {paying
             ? "Processing…"
             : isUpgradeIntent && !prorate
               ? "Calculating upgrade price…"
               : isProratedUpgrade
-                ? `Unlock ${tables} tables · pay ${fmtRupee(prorate.total_with_tax)} for ${prorate.remaining_days} days left`
+                ? `Pay ${fmtRupee(prorate.total_with_tax)} · unlock ${tables} tables`
                 : isUpgradeNow
-                  ? `Unlock ${tables} tables · ${fmtRupee(prorate.total_with_tax)}`
+                  ? `Pay ${fmtRupee(prorate.total_with_tax)} · unlock ${tables} tables`
                   : hasActive
                     ? (isChangeRequest
                         ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
-                        : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
+                        : `Manage plan · ${fmtRupee(pricing?.total_with_tax)}/mo`)
                     : isExpired
-                      ? `Pay & enable monthly autopay · ${fmtRupee(pricing?.total_with_tax)} /mo`
+                      ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`
                       : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
