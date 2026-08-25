@@ -16,6 +16,7 @@ async def record_payment(
     restaurant_id: str,
     payment_id: Optional[str],
     order_id: Optional[str],
+    subscription_id: Optional[str] = None,
     amount_paise: Optional[int],
     currency: str = "INR",
     status: str = "captured",
@@ -36,6 +37,7 @@ async def record_payment(
         "restaurant_id": restaurant_id,
         "payment_id": payment_id,
         "order_id": order_id,
+        "subscription_id": subscription_id,
         "amount_paise": amount_paise,
         "amount": (amount_paise / 100.0) if amount_paise is not None else None,
         "currency": currency,
@@ -54,6 +56,7 @@ async def activate_paid_subscription(
     *,
     payment_id: Optional[str] = None,
     order_id: Optional[str] = None,
+    subscription_id: Optional[str] = None,
     amount_paise: Optional[int] = None,
     enable_autopay: bool = False,
     source: str = "verify",
@@ -78,10 +81,11 @@ async def activate_paid_subscription(
         "last_payment_at": now.isoformat(),
         "cycle_start": now.isoformat(),
         "next_cycle_start": next_cycle.isoformat(),
-        # Autopay flag is preference only until Razorpay mandates exist
-        "autopay_enabled": bool(enable_autopay),
-        "autopay_ready": False,
+        "autopay_enabled": bool(enable_autopay or subscription_id),
+        "autopay_ready": bool(subscription_id),
     }
+    if subscription_id:
+        update["razorpay_subscription_id"] = subscription_id
 
     if tables:
         price = compute_price(int(tables))
@@ -100,6 +104,7 @@ async def activate_paid_subscription(
         restaurant_id=restaurant_id,
         payment_id=payment_id,
         order_id=order_id,
+        subscription_id=subscription_id,
         amount_paise=amount_paise,
         source=source,
         tables=tables,

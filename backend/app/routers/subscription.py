@@ -5,6 +5,8 @@ from app.models import SubscribeBody
 from app.services.pricing import compute_price
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
+from app.services.razorpay_client import razorpay_configured
+from app.services.razorpay_subscriptions import cancel_subscription_at_cycle_end
 from app.services.subscription_access import (
     parse_dt,
     advance_cycle_to_future,
@@ -75,7 +77,7 @@ async def get_subscription(sess=Depends(require_manager)):
         "cycle_end": cycle_end,
         "autopay_enabled": bool(doc.get("autopay_enabled", False)),
         "autopay_ready": bool(doc.get("autopay_ready", False)),
-        "autopay_supported": False,
+        "autopay_supported": razorpay_configured(),
         "razorpay_customer_id": doc.get("razorpay_customer_id"),
         "razorpay_subscription_id": doc.get("razorpay_subscription_id"),
         "last_payment_id": doc.get("last_payment_id"),
@@ -214,16 +216,27 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
 
 @router.put("/subscription/autopay")
 async def toggle_autopay(body: dict, sess=Depends(require_manager)):
-    """Preference flag only — real Razorpay recurring is not enabled yet."""
+    """Toggle Razorpay recurring — cancel at cycle end when disabled."""
     enable = bool(body.get("enabled", False))
-    await rest_svc.update_restaurant(sess["restaurant_id"], {
+    rid = sess["restaurant_id"]
+    doc = await rest_svc.require_restaurant_id(rid)
+    sub_id = doc.get("razorpay_subscription_id")
+
+    if not enable and sub_id:
+        await cancel_subscription_at_cycle_end(sub_id)
+
+    await rest_svc.update_restaurant(rid, {
         "autopay_enabled": enable,
-        "autopay_ready": False,
+        "autopay_ready": bool(sub_id and enable),
     })
     return {
         "success": True,
         "autopay_enabled": enable,
-        "autopay_ready": False,
-        "autopay_supported": False,
-        "message": "Autopay preference saved. Automatic monthly charging will be enabled once Razorpay mandates are configured.",
+        "autopay_ready": bool(sub_id and enable),
+        "autopay_supported": razorpay_configured(),
+        "message": (
+            "Autopay enabled — Razorpay will charge monthly on your saved method."
+            if enable
+            else "Autopay cancelled — no further automatic charges after this billing cycle."
+        ),
     }

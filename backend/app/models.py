@@ -196,3 +196,9 @@ class VerifyPaymentBody(BaseModel):
     razorpay_payment_id: str
     razorpay_signature: Optional[str] = None
     enable_autopay: bool = True
+
+
+class VerifySubscriptionBody(BaseModel):
+    razorpay_subscription_id: str
+    razorpay_payment_id: str
+    razorpay_signature: Optional[str] = None

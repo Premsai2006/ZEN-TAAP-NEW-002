@@ -109,6 +109,8 @@ async def ensure_indexes():
         await db.categories.create_index([("restaurant_id", 1), ("id", 1)])
         await db.orders.create_index([("restaurant_id", 1), ("order_number", -1)])
         await db.sessions.create_index([("restaurant_id", 1), ("scope", 1), ("device_id", 1)])
+        await db.restaurants.create_index("razorpay_subscription_id", sparse=True)
+        await db.razorpay_plans.create_index("tables", unique=True)
     except Exception as e:
         logger.warning("Index ensure skipped/failed: %s", e)
 

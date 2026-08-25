@@ -191,46 +191,43 @@ export default function Subscribe() {
         return;
       }
 
-      const { data: order } = await api.post("/payments/create-order", { tables });
+      const { data: checkout } = await api.post("/payments/create-subscription", { tables });
       const ok = await loadRazorpayScript();
       if (!ok || !window.Razorpay) {
         toast.error("Payment couldn't start. Please refresh the page and try again.");
         return;
       }
       const rzpOptions = {
-        key: order.key_id,
-        amount: order.amount,
-        currency: order.currency,
+        key: checkout.key_id,
+        subscription_id: checkout.subscription_id,
         name: "ZenTaap",
-        description: `${tables} tables · monthly subscription`,
-        order_id: order.order_id,
+        description: `${tables} tables · monthly subscription (auto-renew)`,
         theme: { color: "#e87d2f" },
         prefill: { method },
         notes: { tables: String(tables) },
         handler: async (resp) => {
           try {
-            const { data: verified } = await api.post("/payments/verify", {
-              razorpay_order_id: resp.razorpay_order_id,
+            const { data: verified } = await api.post("/payments/verify-subscription", {
+              razorpay_subscription_id: resp.razorpay_subscription_id,
               razorpay_payment_id: resp.razorpay_payment_id,
               razorpay_signature: resp.razorpay_signature,
-              enable_autopay: false,
             });
             toast.success(
               verified?.next_cycle_start
-                ? `Payment successful — next billing ${fmtDate(verified.next_cycle_start)}`
-                : "Payment successful — subscription active!"
+                ? `Subscription active — auto-renews ${fmtDate(verified.next_cycle_start)}`
+                : "Subscription active — monthly autopay enabled!"
             );
             navigate("/manager");
           } catch (err) {
-            toast.error(friendlyError(err, "We couldn't confirm your payment. Please try again or contact support."));
+            toast.error(friendlyError(err, "We couldn't confirm your subscription. Please try again or contact support."));
           }
         },
         modal: {
           ondismiss: () =>
             toast.info(
               needsPay
-                ? "Payment cancelled — account stays locked until payment succeeds."
-                : "Payment cancelled — you can pay later from Subscription."
+                ? "Payment cancelled — account stays locked until subscription is activated."
+                : "Payment cancelled — you can subscribe later from this page."
             ),
         },
       };
@@ -514,8 +511,8 @@ export default function Subscribe() {
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                     {existing.autopay_enabled
-                      ? `Your next charge of ${fmtRupee(existing.total)} is automatic on ${fmtDate(existing.next_cycle_start)}. You can cancel anytime.`
-                      : "Complete your first payment to enable autopay. After that, future cycles are auto-charged on your saved method."}
+                      ? `Your plan auto-renews monthly. Next charge ${fmtRupee(existing.total)} on ${fmtDate(existing.next_cycle_start)}.`
+                      : "Subscribe with Razorpay to enable monthly auto-renew on your saved payment method."}
                   </div>
                 </div>
                 <span className={`autopay-state ${existing.autopay_enabled ? "on" : "off"}`} data-testid="autopay-state">
