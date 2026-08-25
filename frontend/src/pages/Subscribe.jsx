@@ -268,6 +268,56 @@ export default function Subscribe() {
               const paid = verified?.amount_paise != null
                 ? fmtRupee(verified.amount_paise / 100)
                 : fmtRupee(payAmt);
+
+              const mu = verified?.mandate_upgrade;
+              if (mu?.needs_checkout && mu.subscription_id) {
+                // UPI can't raise mandate max silently — authorize new 20-table autopay for next cycle
+                new window.Razorpay({
+                  key: verified.key_id || order.key_id,
+                  subscription_id: mu.subscription_id,
+                  name: "ZenTaap",
+                  description: mu.description || `Authorize ${tables}-table monthly autopay`,
+                  theme: { color: "#e87d2f" },
+                  notes: { tables: String(tables), kind: "monthly_mandate" },
+                  handler: async (subResp) => {
+                    try {
+                      const { data: subVerified } = await api.post("/payments/verify-subscription", {
+                        razorpay_subscription_id: subResp.razorpay_subscription_id,
+                        razorpay_payment_id: subResp.razorpay_payment_id,
+                        razorpay_signature: subResp.razorpay_signature,
+                      });
+                      showPayResult({
+                        ok: true,
+                        title: "Upgrade + autopay updated!",
+                        message: `All ${verified?.tables || tables} tables are unlocked. You paid ${paid} for days left.`,
+                        detail: subVerified?.next_cycle_start
+                          ? `From ${fmtDate(mu.start_at ? new Date(mu.start_at * 1000).toISOString() : verified.next_cycle_start)} autopay will charge the full ${tables}-table plan.`
+                          : mu.message,
+                        goManager: true,
+                      });
+                    } catch (err) {
+                      showPayResult({
+                        ok: true,
+                        title: "Tables unlocked — finish autopay",
+                        message: `Upgrade paid (${paid}). Please open Subscription again to authorize the new monthly mandate for ${tables} tables.`,
+                        detail: friendlyError(err, "Mandate authorization incomplete."),
+                        goManager: true,
+                      });
+                    }
+                  },
+                  modal: {
+                    ondismiss: () =>
+                      showPayResult({
+                        ok: true,
+                        title: "Tables unlocked",
+                        message: `Upgrade paid (${paid}). Authorize the new ${tables}-table monthly mandate from Subscription when ready — otherwise next autopay may still be the old amount.`,
+                        goManager: true,
+                      }),
+                  },
+                }).open();
+                return;
+              }
+
               showPayResult({
                 ok: true,
                 title: isProrated ? "Upgrade unlocked!" : "Payment successful!",

@@ -16,6 +16,7 @@ from app.services.razorpay_subscriptions import (
     create_checkout_subscription,
     verify_subscription_signature,
     update_subscription_plan,
+    prepare_upgraded_mandate,
     fetch_subscription,
 )
 from app.database import db
@@ -170,6 +171,9 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
 
     amount_paise = doc.get("pending_checkout_amount_paise")
     tables = doc.get("pending_checkout_tables") or doc.get("subscription_tables")
+    # If already active mid-cycle (mandate raise after upgrade), keep existing cycle dates
+    already_active = str(doc.get("subscription_status") or "").lower() == "active"
+    keep_cycle = already_active and bool(doc.get("next_cycle_start"))
 
     client = razorpay_client()
     if client:
@@ -192,8 +196,8 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
         enable_autopay=True,
         source="verify_subscription",
         tables_override=int(tables) if tables else None,
-        preserve_cycle=False,  # first mandate charge starts a fresh billing cycle
-        next_cycle_override=None,
+        preserve_cycle=keep_cycle,
+        next_cycle_override=doc.get("next_cycle_start") if keep_cycle else None,
         payment_kind="monthly_mandate",
     )
 
@@ -282,18 +286,37 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
         next_cycle_override=next_cycle_keep,
         payment_kind=payment_kind,
     )
-    # Mid-cycle upgrade: keep existing mandate but bill new table tier next cycle
+    # Mid-cycle upgrade: raise next-cycle mandate to new table count
+    mandate_upgrade = None
     if payment_kind == "upgrade_proration" and tables:
-        await update_subscription_plan(rid, int(tables))
+        try:
+            mandate_upgrade = await prepare_upgraded_mandate(
+                rid,
+                tables=int(tables),
+                next_cycle_iso=updated.get("next_cycle_start") or next_cycle_keep,
+            )
+        except Exception as exc:
+            logger.warning("prepare_upgraded_mandate failed rid=%s: %s", rid, exc)
+            mandate_upgrade = {"needs_checkout": False, "mode": "failed", "message": str(exc)}
 
-    await rest_svc.update_restaurant(rid, {
-        "pending_checkout_tables": None,
-        "pending_checkout_order_id": None,
-        "pending_checkout_amount_paise": None,
-        "pending_checkout_kind": None,
-        "pending_checkout_preserve_cycle": None,
-        "pending_checkout_next_cycle": None,
-    })
+    if not (mandate_upgrade or {}).get("needs_checkout"):
+        await rest_svc.update_restaurant(rid, {
+            "pending_checkout_tables": None,
+            "pending_checkout_order_id": None,
+            "pending_checkout_amount_paise": None,
+            "pending_checkout_kind": None,
+            "pending_checkout_preserve_cycle": None,
+            "pending_checkout_next_cycle": None,
+            "pending_checkout_subscription_id": None,
+        })
+    else:
+        # Keep pending_* set by prepare_upgraded_mandate for verify-subscription
+        await rest_svc.update_restaurant(rid, {
+            "pending_checkout_order_id": None,
+            "pending_checkout_preserve_cycle": None,
+            "pending_checkout_next_cycle": None,
+        })
+
     return {
         "success": True,
         "status": "active",
@@ -306,6 +329,8 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
         "payment_kind": payment_kind,
         "preserve_cycle": preserve_cycle,
         "amount_paise": amount_paise,
+        "mandate_upgrade": mandate_upgrade,
+        "key_id": RAZORPAY_KEY_ID if (mandate_upgrade or {}).get("needs_checkout") else None,
     }
 
 

@@ -73,8 +73,8 @@ async def cancel_subscription_at_cycle_end(subscription_id: Optional[str]) -> bo
 
 async def update_subscription_plan(restaurant_id: str, tables: int) -> Optional[str]:
     """
-    Point an existing Razorpay subscription at the new table-tier plan
-    so the next autopay charge uses the upgraded amount.
+    Try to point an existing Razorpay subscription at the new table-tier plan.
+    Works for card mandates; UPI mandates cannot be updated (returns None).
     """
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     sub_id = (doc.get("razorpay_subscription_id") or "").strip()
@@ -85,7 +85,6 @@ async def update_subscription_plan(restaurant_id: str, tables: int) -> Optional[
         return None
     plan_id = await get_plan_id_for_restaurant(doc, int(tables))
     try:
-        # schedule_change_at cycle_end keeps current cycle; next charge uses new plan
         client.subscription.update(
             sub_id,
             {
@@ -108,11 +107,67 @@ async def update_subscription_plan(restaurant_id: str, tables: int) -> Optional[
         return None
 
 
+async def prepare_upgraded_mandate(
+    restaurant_id: str,
+    *,
+    tables: int,
+    next_cycle_iso: Optional[str],
+) -> dict:
+    """
+    After a mid-cycle proration payment:
+    1) Try updating the existing subscription plan (cards).
+    2) If that fails (typical for UPI), cancel old sub at cycle end and create a
+       new subscription for the higher table count starting at next_cycle.
+       Frontend must open checkout so the customer authorizes the new max amount.
+    """
+    from app.services.subscription_access import parse_dt
+
+    # Card path — silent plan change at cycle end
+    updated = await update_subscription_plan(restaurant_id, int(tables))
+    if updated:
+        return {
+            "needs_checkout": False,
+            "mode": "plan_updated",
+            "plan_id": updated,
+            "message": f"Next autopay will charge the {tables}-table plan.",
+        }
+
+    doc = await rest_svc.require_restaurant_id(restaurant_id)
+    old_sub = (doc.get("razorpay_subscription_id") or "").strip()
+    if old_sub:
+        await cancel_subscription_now(old_sub, at_cycle_end=True)
+
+    start_at = None
+    next_dt = parse_dt(next_cycle_iso)
+    if next_dt:
+        ts = int(next_dt.timestamp())
+        if ts > int(time.time()) + 120:
+            start_at = ts
+
+    checkout, _sub = await create_checkout_subscription(
+        restaurant_id,
+        tables=int(tables),
+        start_at=start_at,
+        replace_existing=False,
+    )
+    price = compute_price_for_restaurant(int(tables), doc)
+    return {
+        "needs_checkout": True,
+        "mode": "new_mandate",
+        "message": (
+            f"Authorize monthly autopay for {tables} tables "
+            f"({price['total_with_tax']:.0f}/mo) from the next billing date."
+        ),
+        **checkout,
+    }
+
+
 async def create_checkout_subscription(
     restaurant_id: str,
     *,
     tables: int,
     start_at: Optional[int] = None,
+    replace_existing: bool = True,
 ) -> Tuple[dict, dict]:
     """
     Create a Razorpay Subscription (monthly mandate / autopay).
@@ -126,7 +181,7 @@ async def create_checkout_subscription(
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     old_sub = (doc.get("razorpay_subscription_id") or "").strip()
     # Replace any previous mandate so renew/expired always gets a fresh monthly subscription
-    if old_sub:
+    if replace_existing and old_sub:
         await cancel_subscription_now(old_sub, at_cycle_end=False)
 
     plan_id = await get_plan_id_for_restaurant(doc, int(tables))
@@ -165,6 +220,7 @@ async def create_checkout_subscription(
             "pending_checkout_next_cycle": None,
             "razorpay_subscription_id": sub["id"],
             "razorpay_plan_id": plan_id,
+            "pending_razorpay_plan_tables": int(tables),
         },
     )
 
@@ -173,6 +229,9 @@ async def create_checkout_subscription(
         if price.get("billing_override")
         else f"ZenTaap {tables} tables — monthly autopay mandate"
     )
+    if start_at:
+        desc = f"{desc} (starts next cycle)"
+
     checkout = {
         "mode": "subscription",
         "subscription_id": sub["id"],
@@ -188,6 +247,7 @@ async def create_checkout_subscription(
         "autopay": True,
         "billing_override": bool(price.get("billing_override")),
         "description": desc,
+        "start_at": start_at,
     }
     return checkout, sub
 
