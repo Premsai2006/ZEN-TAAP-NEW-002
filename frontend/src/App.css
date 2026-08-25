@@ -1799,6 +1799,113 @@ tr:last-child td { border-bottom: none; }
 .cycle-pill-start svg { color: var(--green); }
 .cycle-pill-end { border-color: rgba(232,125,47,0.45); background: linear-gradient(90deg, rgba(232,125,47,0.12), rgba(232,125,47,0.02)); }
 .cycle-pill-end svg { color: var(--gold); }
+
+.prorate-card {
+  margin-bottom: 22px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(232,125,47,0.35);
+  background:
+    linear-gradient(135deg, rgba(232,125,47,0.12), rgba(232,125,47,0.03)),
+    var(--card, rgba(255,255,255,0.03));
+}
+.prorate-card-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.prorate-card-msg {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.prorate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.prorate-k {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.prorate-v {
+  font-size: 18px;
+  font-weight: 700;
+}
+.prorate-v.gold { color: var(--gold); }
+.prorate-foot {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pay-result-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(12, 10, 8, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: payFadeIn 0.2s ease;
+}
+@keyframes payFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.pay-result-card {
+  position: relative;
+  width: min(400px, 100%);
+  border-radius: 18px;
+  padding: 28px 24px 22px;
+  background: var(--bg, #161310);
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  text-align: center;
+  animation: payPop 0.25s ease;
+}
+@keyframes payPop {
+  from { transform: translateY(10px) scale(0.97); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.pay-result-card.ok { border-color: rgba(95,184,122,0.45); }
+.pay-result-card.fail { border-color: rgba(217,99,99,0.45); }
+.pay-result-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+}
+.pay-result-icon {
+  margin-bottom: 12px;
+}
+.pay-result-card.ok .pay-result-icon { color: var(--green, #5fb87a); }
+.pay-result-card.fail .pay-result-icon { color: #d96363; }
+.pay-result-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.pay-result-msg {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.pay-result-detail {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
 .pay-brand.gpay { background: #fff; color: #5f6368; border: 1px solid #dadce0; }
 .pay-brand.phonepe { background: #5f259f; }
 .pay-brand.paytm { background: #00baf2; }

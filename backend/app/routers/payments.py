@@ -7,7 +7,7 @@ from app.config import (
     RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET, RAZORPAY_PAYMENT_LINK,
 )
 from app.models import RazorpayOrderBody, VerifyPaymentBody, VerifySubscriptionBody
-from app.services.pricing import compute_price
+from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
 from app.services.payment_activate import activate_paid_subscription, record_payment
@@ -15,9 +15,11 @@ from app.services.razorpay_client import razorpay_client, razorpay_configured
 from app.services.razorpay_subscriptions import (
     create_checkout_subscription,
     verify_subscription_signature,
-    cancel_subscription_at_cycle_end,
+    update_subscription_plan,
+    fetch_subscription,
 )
 from app.database import db
+from app.services.subscription_access import refresh_subscription_status
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 logger = logging.getLogger(__name__)
@@ -66,9 +68,7 @@ async def create_razorpay_subscription(body: RazorpayOrderBody, sess=Depends(req
 
 @router.post("/create-order")
 async def create_razorpay_order(body: RazorpayOrderBody, sess=Depends(require_manager)):
-    """Legacy one-time order path — prefer /create-subscription for recurring billing."""
-    price = compute_price(body.tables)
-    amount_paise = int(round(price["total_with_tax"] * 100))
+    """One-time order — used for mid-cycle upgrade proration (legacy renew also works)."""
     client = razorpay_client()
     rid = sess["restaurant_id"]
     if not client:
@@ -76,18 +76,59 @@ async def create_razorpay_order(body: RazorpayOrderBody, sess=Depends(require_ma
             status_code=503,
             detail="Online payments are not configured yet. Ask ZenTaap support to add Razorpay keys.",
         )
+
+    doc, status = await refresh_subscription_status(rid)
+    current_tables = doc.get("subscription_tables")
+    kind = "subscription"
+    preserve_cycle = False
+    next_cycle_keep = None
+    proration = None
+
+    if (
+        status == "active"
+        and current_tables
+        and int(body.tables) > int(current_tables)
+    ):
+        proration = compute_upgrade_proration(
+            int(current_tables),
+            int(body.tables),
+            doc.get("next_cycle_start"),
+            restaurant=doc,
+        )
+        amount_paise = proration["amount_paise"]
+        kind = proration["kind"]
+        preserve_cycle = bool(proration.get("preserve_cycle"))
+        next_cycle_keep = proration.get("next_cycle_start")
+        price_note = proration
+    else:
+        price = compute_price_for_restaurant(body.tables, doc)
+        amount_paise = int(price["amount_paise"])
+        price_note = price
+        if price.get("billing_override"):
+            kind = "monthly_mandate"
+    if amount_paise < 100:
+        amount_paise = 100
+
     receipt = f"zt_{rid[:8]}_{uuid.uuid4().hex[:8]}"[:40]
     order = client.order.create({
         "amount": amount_paise,
         "currency": "INR",
         "payment_capture": 1,
         "receipt": receipt,
-        "notes": {"restaurant_id": rid, "tables": str(body.tables)},
+        "notes": {
+            "restaurant_id": rid,
+            "tables": str(body.tables),
+            "kind": kind,
+            "preserve_cycle": "1" if preserve_cycle else "0",
+        },
     })
     await rest_svc.update_restaurant(rid, {
         "pending_checkout_tables": body.tables,
         "pending_checkout_order_id": order["id"],
         "pending_checkout_amount_paise": amount_paise,
+        "pending_checkout_kind": kind,
+        "pending_checkout_preserve_cycle": preserve_cycle,
+        "pending_checkout_next_cycle": next_cycle_keep,
     })
     return {
         "configured": True,
@@ -98,6 +139,10 @@ async def create_razorpay_order(body: RazorpayOrderBody, sess=Depends(require_ma
         "currency": "INR",
         "receipt": receipt,
         "restaurant_id": rid,
+        "kind": kind,
+        "preserve_cycle": preserve_cycle,
+        "proration": proration,
+        "pricing": price_note if not proration else None,
     }
 
 
@@ -147,23 +192,43 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
         enable_autopay=True,
         source="verify_subscription",
         tables_override=int(tables) if tables else None,
+        preserve_cycle=False,  # first mandate charge starts a fresh billing cycle
+        next_cycle_override=None,
+        payment_kind="monthly_mandate",
     )
+
+    sub_meta = fetch_subscription(body.razorpay_subscription_id) or {}
+    sub_status = str(sub_meta.get("status") or "").lower()
+    mandate_ready = sub_status in ("active", "authenticated")
+
     await rest_svc.update_restaurant(rid, {
         "pending_checkout_tables": None,
         "pending_checkout_order_id": None,
         "pending_checkout_amount_paise": None,
         "pending_checkout_subscription_id": None,
+        "pending_checkout_kind": None,
+        "pending_checkout_preserve_cycle": None,
+        "pending_checkout_next_cycle": None,
         "razorpay_subscription_id": body.razorpay_subscription_id,
+        "autopay_enabled": True,
+        "autopay_ready": mandate_ready,
+        "razorpay_subscription_status": sub_status or "created",
     })
     return {
         "success": True,
         "status": "active",
         "autopay_enabled": True,
-        "autopay_ready": True,
+        "autopay_ready": mandate_ready,
+        "mandate": True,
+        "subscription_status": sub_status or None,
         "payment_id": body.razorpay_payment_id,
         "subscription_id": body.razorpay_subscription_id,
         "next_cycle_start": updated.get("next_cycle_start"),
         "cycle_start": updated.get("cycle_start"),
+        "tables": updated.get("subscription_tables"),
+        "payment_kind": "monthly_mandate",
+        "amount_paise": amount_paise,
+        "message": "Monthly autopay mandate is active. ZenTaap will auto-deduct each billing cycle.",
     }
 
 
@@ -189,6 +254,9 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
     doc = await rest_svc.require_restaurant_id(rid)
     amount_paise = doc.get("pending_checkout_amount_paise")
     tables = doc.get("pending_checkout_tables") or doc.get("subscription_tables")
+    preserve_cycle = bool(doc.get("pending_checkout_preserve_cycle"))
+    next_cycle_keep = doc.get("pending_checkout_next_cycle")
+    payment_kind = doc.get("pending_checkout_kind") or "subscription"
 
     try:
         pay = client.payment.fetch(body.razorpay_payment_id)
@@ -210,11 +278,21 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
         enable_autopay=bool(body.enable_autopay),
         source="verify",
         tables_override=int(tables) if tables else None,
+        preserve_cycle=preserve_cycle,
+        next_cycle_override=next_cycle_keep,
+        payment_kind=payment_kind,
     )
+    # Mid-cycle upgrade: keep existing mandate but bill new table tier next cycle
+    if payment_kind == "upgrade_proration" and tables:
+        await update_subscription_plan(rid, int(tables))
+
     await rest_svc.update_restaurant(rid, {
         "pending_checkout_tables": None,
         "pending_checkout_order_id": None,
         "pending_checkout_amount_paise": None,
+        "pending_checkout_kind": None,
+        "pending_checkout_preserve_cycle": None,
+        "pending_checkout_next_cycle": None,
     })
     return {
         "success": True,
@@ -224,6 +302,10 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
         "payment_id": body.razorpay_payment_id,
         "next_cycle_start": updated.get("next_cycle_start"),
         "cycle_start": updated.get("cycle_start"),
+        "tables": updated.get("subscription_tables"),
+        "payment_kind": payment_kind,
+        "preserve_cycle": preserve_cycle,
+        "amount_paise": amount_paise,
     }
 
 
@@ -275,6 +357,20 @@ async def razorpay_webhook(request: Request):
             rid = doc.get("id") if doc else None
 
         if rid:
+            rest_doc = await rest_svc.get_by_id(rid) or {}
+            kind = notes.get("kind") or rest_doc.get("pending_checkout_kind") or "subscription"
+            # Monthly mandate renewals always start a new cycle; only upgrade_proration keeps dates
+            is_upgrade = kind == "upgrade_proration" or (
+                event == "payment.captured"
+                and str(notes.get("preserve_cycle") or "").strip() in ("1", "true", "True")
+            )
+            if event in ("subscription.charged", "subscription.activated"):
+                is_upgrade = False
+                kind = "monthly_mandate"
+            preserve = bool(is_upgrade)
+            if preserve and kind == "upgrade_proration":
+                preserve = preserve or bool(rest_doc.get("pending_checkout_preserve_cycle"))
+            next_keep = rest_doc.get("pending_checkout_next_cycle") if preserve else None
             await activate_paid_subscription(
                 rid,
                 payment_id=pid,
@@ -284,9 +380,24 @@ async def razorpay_webhook(request: Request):
                 enable_autopay=True,
                 source="webhook",
                 tables_override=int(tables) if tables else None,
+                preserve_cycle=preserve,
+                next_cycle_override=next_keep,
+                payment_kind=kind if preserve else "monthly_mandate",
             )
+            clear = {
+                "pending_checkout_tables": None,
+                "pending_checkout_order_id": None,
+                "pending_checkout_amount_paise": None,
+                "pending_checkout_kind": None,
+                "pending_checkout_preserve_cycle": None,
+                "pending_checkout_next_cycle": None,
+                "autopay_enabled": True,
+                "autopay_ready": True,
+            }
             if sub_id:
-                await rest_svc.update_restaurant(rid, {"razorpay_subscription_id": sub_id})
+                clear["razorpay_subscription_id"] = sub_id
+                clear["razorpay_subscription_status"] = "active"
+            await rest_svc.update_restaurant(rid, clear)
         else:
             logger.warning("Webhook missing restaurant_id; payment %s ignored", pid)
             await record_payment(

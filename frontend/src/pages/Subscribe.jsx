@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, CreditCard, Smartphone, Building2, Wallet, Calculator, FileText, Check, RefreshCw, QrCode, Repeat, Download, X, CheckCircle2, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
@@ -62,12 +62,17 @@ export default function Subscribe() {
   const [paying, setPaying] = useState(false);
   const [existing, setExisting] = useState(null);
   const [zippingQrs, setZippingQrs] = useState(false);
+  const [upgradeQuote, setUpgradeQuote] = useState(null);
+  const [payResult, setPayResult] = useState(null); // { ok, title, message, detail }
 
   useEffect(() => {
     api
-      .get(`/pricing?tables=${tables}`)
+      .get(`/pricing/me?tables=${tables}`)
       .then((r) => setPricing(r.data))
-      .catch(() => {});
+      .catch(() => {
+        // Fallback to public pricing if session cookie missing
+        api.get(`/pricing?tables=${tables}`).then((r) => setPricing(r.data)).catch(() => {});
+      });
   }, [tables]);
 
   // Load existing subscription once on mount; pre-fill slider with current tables.
@@ -82,10 +87,33 @@ export default function Subscribe() {
       .catch(() => {});
   }, []);
 
+  // Live mid-cycle upgrade proration preview
+  useEffect(() => {
+    if (!existing?.tables || existing.status !== "active" || tables <= existing.tables) {
+      setUpgradeQuote(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/pricing/upgrade-quote?tables=${tables}`)
+      .then((r) => {
+        if (!cancelled) setUpgradeQuote(r.data);
+      })
+      .catch(() => {
+        if (!cancelled) setUpgradeQuote(null);
+      });
+    return () => { cancelled = true; };
+  }, [tables, existing?.tables, existing?.status, existing?.next_cycle_start]);
+
   const hasActive = existing && existing.tables && ["trial", "active"].includes(existing.status);
   const canStartTrial = !existing || !existing.status || ["none", "skipped"].includes(existing.status);
   const isExpired = existing?.status === "expired";
   const isChangeRequest = hasActive && tables !== existing.tables;
+  const isUpgradeIntent =
+    existing?.status === "active" && tables > (existing?.tables || 0);
+  const isUpgradeNow = isUpgradeIntent && upgradeQuote?.applicable && upgradeQuote?.proration;
+  const prorate = isUpgradeNow ? upgradeQuote.proration : null;
+  const isProratedUpgrade = Boolean(prorate?.preserve_cycle);
 
   const effectiveFrom = useMemo(() => {
     const raw = existing?.effective_from || existing?.next_cycle_start;
@@ -158,6 +186,8 @@ export default function Subscribe() {
     }
   };
 
+  const showPayResult = (payload) => setPayResult(payload);
+
   const onSubscribe = async () => {
     if (!pricing) return;
     setPaying(true);
@@ -176,11 +206,12 @@ export default function Subscribe() {
       }
       if (planResp.applied === "trial") {
         toast.success(`Free trial started — ends ${fmtDate(planResp.trial_end)}. Pay anytime before it ends.`);
-        // Optional: open checkout for first paid cycle now
       }
 
-      // Payment required (expired renew / upgrade) OR optional pay after trial start
-      const needsPay = planResp.needs_payment || planResp.applied === "awaiting_payment";
+      const needsPay =
+        planResp.needs_payment ||
+        planResp.applied === "awaiting_payment" ||
+        planResp.applied === "upgrade_proration";
       if (!needsPay && planResp.applied === "trial") {
         navigate("/manager");
         return;
@@ -191,20 +222,94 @@ export default function Subscribe() {
         return;
       }
 
-      const { data: checkout } = await api.post("/payments/create-subscription", { tables });
+      const useUpgradeOrder =
+        planResp.applied === "upgrade_proration" ||
+        planResp.proration?.kind === "upgrade_proration" ||
+        (existing?.status === "active" && tables > (existing?.tables || 0));
+
       const ok = await loadRazorpayScript();
       if (!ok || !window.Razorpay) {
-        toast.error("Payment couldn't start. Please refresh the page and try again.");
+        showPayResult({
+          ok: false,
+          title: "Payment couldn't start",
+          message: "Please refresh the page and try again.",
+        });
         return;
       }
-      const rzpOptions = {
+
+      if (useUpgradeOrder) {
+        // Mid-cycle upgrade: one-time prorated order (keeps cycle end)
+        const { data: order } = await api.post("/payments/create-order", { tables });
+        const pr = order.proration || planResp.proration;
+        const isProrated = order.kind === "upgrade_proration" || pr?.kind === "upgrade_proration";
+        const payAmt = (order.amount || 0) / 100;
+        const desc = isProrated
+          ? `Upgrade to ${tables} tables · ${pr?.remaining_days || "?"} days left`
+          : `${tables} tables · unlock now`;
+
+        new window.Razorpay({
+          key: order.key_id,
+          amount: order.amount,
+          currency: order.currency,
+          name: "ZenTaap",
+          description: desc,
+          order_id: order.order_id,
+          theme: { color: "#e87d2f" },
+          prefill: { method },
+          notes: { tables: String(tables), kind: order.kind || "subscription" },
+          handler: async (resp) => {
+            try {
+              const { data: verified } = await api.post("/payments/verify", {
+                razorpay_order_id: resp.razorpay_order_id,
+                razorpay_payment_id: resp.razorpay_payment_id,
+                razorpay_signature: resp.razorpay_signature,
+                enable_autopay: false,
+              });
+              const paid = verified?.amount_paise != null
+                ? fmtRupee(verified.amount_paise / 100)
+                : fmtRupee(payAmt);
+              showPayResult({
+                ok: true,
+                title: isProrated ? "Upgrade unlocked!" : "Payment successful!",
+                message: isProrated
+                  ? `All ${verified?.tables || tables} tables are active now. You paid ${paid} for the remaining days.`
+                  : `Your plan is active. Charged ${paid}.`,
+                detail: verified?.next_cycle_start
+                  ? `Next full billing on ${fmtDate(verified.next_cycle_start)} for ${verified?.tables || tables} tables.`
+                  : null,
+                goManager: true,
+              });
+            } catch (err) {
+              showPayResult({
+                ok: false,
+                title: "Payment confirmation failed",
+                message: friendlyError(err, "We couldn't confirm your payment. If money was deducted, contact support with your payment ID."),
+                detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
+              });
+            }
+          },
+          modal: {
+            ondismiss: () =>
+              showPayResult({
+                ok: false,
+                title: "Payment cancelled",
+                message: "No charge was made. Your current tables stay as they are until you complete the upgrade payment.",
+              }),
+          },
+        }).open();
+        return;
+      }
+
+      // New / renew / trial→paid: Razorpay Subscription (monthly autopay mandate)
+      const { data: checkout } = await api.post("/payments/create-subscription", { tables });
+      new window.Razorpay({
         key: checkout.key_id,
         subscription_id: checkout.subscription_id,
         name: "ZenTaap",
-        description: `${tables} tables · monthly subscription (auto-renew)`,
+        description: checkout.description || `${tables} tables · monthly autopay mandate`,
         theme: { color: "#e87d2f" },
         prefill: { method },
-        notes: { tables: String(tables) },
+        notes: { tables: String(tables), kind: "monthly_mandate" },
         handler: async (resp) => {
           try {
             const { data: verified } = await api.post("/payments/verify-subscription", {
@@ -212,28 +317,42 @@ export default function Subscribe() {
               razorpay_payment_id: resp.razorpay_payment_id,
               razorpay_signature: resp.razorpay_signature,
             });
-            toast.success(
-              verified?.next_cycle_start
-                ? `Subscription active — auto-renews ${fmtDate(verified.next_cycle_start)}`
-                : "Subscription active — monthly autopay enabled!"
-            );
-            navigate("/manager");
+            showPayResult({
+              ok: true,
+              title: "Autopay mandate active!",
+              message: verified?.message
+                || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
+              detail: verified?.next_cycle_start
+                ? `Next auto-debit on ${fmtDate(verified.next_cycle_start)} · ${tables} tables.`
+                : "You can turn autopay off anytime from Subscription.",
+              goManager: true,
+            });
           } catch (err) {
-            toast.error(friendlyError(err, "We couldn't confirm your subscription. Please try again or contact support."));
+            showPayResult({
+              ok: false,
+              title: "Mandate confirmation failed",
+              message: friendlyError(err, "We couldn't confirm your subscription. Please try again or contact support."),
+              detail: resp?.razorpay_payment_id ? `Payment ID: ${resp.razorpay_payment_id}` : null,
+            });
           }
         },
         modal: {
           ondismiss: () =>
-            toast.info(
-              needsPay
-                ? "Payment cancelled — account stays locked until subscription is activated."
-                : "Payment cancelled — you can subscribe later from this page."
-            ),
+            showPayResult({
+              ok: false,
+              title: "Payment cancelled",
+              message: needsPay
+                ? "Payment cancelled — account stays locked until the monthly mandate is activated."
+                : "Payment cancelled — you can set up autopay later from this page.",
+            }),
         },
-      };
-      new window.Razorpay(rzpOptions).open();
+      }).open();
     } catch (err) {
-      toast.error(friendlyError(err, "Couldn't start your subscription. Please try again."));
+      showPayResult({
+        ok: false,
+        title: "Couldn't start subscription",
+        message: friendlyError(err, "Please try again."),
+      });
     } finally {
       setPaying(false);
     }
@@ -325,7 +444,7 @@ export default function Subscribe() {
           </div>
         )}
 
-        {/* Active subscription banner: mid-cycle change applies next cycle */}
+        {/* Active subscription banner */}
         {hasActive && (
           <div
             data-testid="sub-change-notice"
@@ -344,14 +463,24 @@ export default function Subscribe() {
             <RefreshCw size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
             <div style={{ fontSize: 13, lineHeight: 1.55, flex: 1 }}>
               You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
-              {isChangeRequest ? (
+              {isProratedUpgrade ? (
+                <>
+                  Adding tables now? Pay only for the <b>extra tables</b> for the days left in this cycle.
+                  From <b>{fmtDate(prorate?.next_cycle_start || existing.next_cycle_start)}</b> you&apos;ll
+                  be billed the full <b>{tables}-table</b> plan.
+                </>
+              ) : isChangeRequest && tables < existing.tables ? (
+                <>
+                  Reducing to <b>{tables} tables</b> takes effect from <b>{fmtEffective}</b> (next cycle).
+                  Your current cycle continues unchanged until then.
+                </>
+              ) : isChangeRequest ? (
                 <>
                   Updating to <b>{tables} tables</b> will be billed from <b>{fmtEffective}</b>
                   {effectiveFrom && effectiveFrom.getTime() <= Date.now() + 60_000 ? " (effective immediately)" : " (next cycle)"}.
-                  Your current cycle continues unchanged until then.
                 </>
               ) : (
-                <>Adjust the slider to change your plan. Mid-cycle changes take effect on the next cycle.</>
+                <>Adjust the slider to change your plan. Upgrades unlock after a small prorated payment for days left.</>
               )}
               <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }} data-testid="sub-cycle-dates">
                 <div className="cycle-pill cycle-pill-start">
@@ -376,6 +505,30 @@ export default function Subscribe() {
                   Pending change: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo).
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {isProratedUpgrade && prorate && (
+          <div className="prorate-card" data-testid="prorate-card">
+            <div className="prorate-card-title">Pay only for days left</div>
+            <div className="prorate-card-msg">{prorate.message}</div>
+            <div className="prorate-grid">
+              <div>
+                <div className="prorate-k">Extra tables</div>
+                <div className="prorate-v">+{prorate.extra_tables}</div>
+              </div>
+              <div>
+                <div className="prorate-k">Days remaining</div>
+                <div className="prorate-v">{prorate.remaining_days}</div>
+              </div>
+              <div>
+                <div className="prorate-k">Due now</div>
+                <div className="prorate-v gold">{fmtRupee(prorate.total_with_tax)}</div>
+              </div>
+            </div>
+            <div className="prorate-foot">
+              Full plan after {fmtDate(prorate.next_cycle_start)}: {fmtRupee(prorate.monthly_new)}/mo
             </div>
           </div>
         )}
@@ -501,23 +654,34 @@ export default function Subscribe() {
               </div>
             </div>
 
-            {/* Autopay status pill */}
+            {/* Autopay / mandate status */}
             {hasActive && (
               <div className="autopay-card" data-testid="autopay-card">
                 <Repeat size={18} color={existing.autopay_enabled ? "var(--green)" : "var(--muted)"} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>
-                    Autopay {existing.autopay_enabled ? "is ON" : "is OFF"}
+                    {existing.autopay_enabled ? "Monthly autopay mandate is ON" : "Monthly autopay is OFF"}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                     {existing.autopay_enabled
-                      ? `Your plan auto-renews monthly. Next charge ${fmtRupee(existing.total)} on ${fmtDate(existing.next_cycle_start)}.`
-                      : "Subscribe with Razorpay to enable monthly auto-renew on your saved payment method."}
+                      ? `ZenTaap auto-deducts ${fmtRupee(existing.total)} each cycle (next: ${fmtDate(existing.next_cycle_start)}). Cancel anytime.`
+                      : "Pay once with Razorpay Subscription to authorize a UPI/card mandate — then every month is auto-charged."}
                   </div>
                 </div>
                 <span className={`autopay-state ${existing.autopay_enabled ? "on" : "off"}`} data-testid="autopay-state">
                   {existing.autopay_enabled ? "ON" : "OFF"}
                 </span>
+              </div>
+            )}
+            {isExpired && (
+              <div className="autopay-card" data-testid="mandate-renew-card" style={{ marginTop: 0, marginBottom: 18 }}>
+                <Repeat size={18} color="var(--gold)" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Resume with monthly autopay</div>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                    Your payment sets up a Razorpay mandate. After the first charge, the same amount auto-deducts every month until you cancel.
+                  </div>
+                </div>
               </div>
             )}
 
@@ -600,24 +764,80 @@ export default function Subscribe() {
         <button
           className="submit-btn"
           onClick={onSubscribe}
-          disabled={paying}
+          disabled={paying || (isUpgradeIntent && !prorate)}
           data-testid="subscribe-btn"
           style={{ width: "100%", padding: "16px", fontSize: 15, marginTop: 22 }}
         >
           {paying
             ? "Processing…"
-            : hasActive
-              ? (isChangeRequest
-                  ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
-                  : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
-              : isExpired
-                ? `Pay & Resume · ${fmtRupee(pricing?.total_with_tax)} /mo`
-                : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
+            : isUpgradeIntent && !prorate
+              ? "Calculating upgrade price…"
+              : isProratedUpgrade
+                ? `Unlock ${tables} tables · pay ${fmtRupee(prorate.total_with_tax)} for ${prorate.remaining_days} days left`
+                : isUpgradeNow
+                  ? `Unlock ${tables} tables · ${fmtRupee(prorate.total_with_tax)}`
+                  : hasActive
+                    ? (isChangeRequest
+                        ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
+                        : `Update payment method · ${fmtRupee(pricing?.total_with_tax)}/mo`)
+                    : isExpired
+                      ? `Pay & enable monthly autopay · ${fmtRupee(pricing?.total_with_tax)} /mo`
+                      : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
-          <ShieldCheck size={12} /> Secured by 256-bit SSL · PCI DSS · UPI Autopay
+          <ShieldCheck size={12} /> Secured by Razorpay · Monthly mandate / UPI Autopay · Cancel anytime
         </div>
       </div>
+
+      {payResult && (
+        <div
+          className="pay-result-overlay"
+          data-testid="pay-result-modal"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              const go = payResult.goManager;
+              setPayResult(null);
+              if (go) navigate("/manager");
+            }
+          }}
+        >
+          <div className={`pay-result-card ${payResult.ok ? "ok" : "fail"}`}>
+            <button
+              type="button"
+              className="pay-result-close"
+              aria-label="Close"
+              onClick={() => {
+                const go = payResult.goManager;
+                setPayResult(null);
+                if (go) navigate("/manager");
+              }}
+            >
+              <X size={18} />
+            </button>
+            <div className="pay-result-icon">
+              {payResult.ok ? <CheckCircle2 size={48} /> : <XCircle size={48} />}
+            </div>
+            <div className="pay-result-title">{payResult.title}</div>
+            <div className="pay-result-msg">{payResult.message}</div>
+            {payResult.detail && <div className="pay-result-detail">{payResult.detail}</div>}
+            <button
+              type="button"
+              className="submit-btn"
+              style={{ width: "100%", marginTop: 18, padding: "12px 16px" }}
+              data-testid="pay-result-ok"
+              onClick={() => {
+                const go = payResult.goManager;
+                setPayResult(null);
+                if (go) navigate("/manager");
+              }}
+            >
+              {payResult.ok ? "Continue to Manager" : "OK"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

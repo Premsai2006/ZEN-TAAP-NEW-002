@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from app.config import TRIAL_DAYS
 from app.models import SubscribeBody
-from app.services.pricing import compute_price
+from app.services.pricing import compute_price, compute_upgrade_proration, compute_price_for_restaurant
 from app.deps import require_manager
 from app.services import restaurants as rest_svc
 from app.services.razorpay_client import razorpay_configured
@@ -22,6 +22,31 @@ router = APIRouter(tags=["subscription"])
 async def pricing(tables: int = 14):
     return compute_price(tables)
 
+
+@router.get("/pricing/me")
+async def pricing_for_me(tables: int = 14, sess=Depends(require_manager)):
+    """Restaurant-aware pricing (honours billing_override_paise for demo accounts)."""
+    doc, _status = await refresh_subscription_status(sess["restaurant_id"])
+    return compute_price_for_restaurant(tables, doc)
+
+
+@router.get("/pricing/upgrade-quote")
+async def upgrade_quote(tables: int, sess=Depends(require_manager)):
+    """Preview mid-cycle upgrade proration for the logged-in restaurant."""
+    doc, status = await refresh_subscription_status(sess["restaurant_id"])
+    current = int(doc.get("subscription_tables") or 0)
+    monthly = compute_price_for_restaurant(tables, doc)
+    if status != "active" or current < 1:
+        return {"applicable": False, "reason": "not_active", "monthly": monthly}
+    if tables <= current:
+        return {
+            "applicable": False,
+            "reason": "decrease_or_same",
+            "current_tables": current,
+            "monthly": monthly,
+        }
+    prorate = compute_upgrade_proration(current, tables, doc.get("next_cycle_start"), restaurant=doc)
+    return {"applicable": True, "proration": prorate, "monthly": monthly}
 
 @router.get("/subscription")
 async def get_subscription(sess=Depends(require_manager)):
@@ -78,8 +103,10 @@ async def get_subscription(sess=Depends(require_manager)):
         "autopay_enabled": bool(doc.get("autopay_enabled", False)),
         "autopay_ready": bool(doc.get("autopay_ready", False)),
         "autopay_supported": razorpay_configured(),
+        "mandate": bool(doc.get("razorpay_subscription_id") and doc.get("autopay_enabled")),
         "razorpay_customer_id": doc.get("razorpay_customer_id"),
         "razorpay_subscription_id": doc.get("razorpay_subscription_id"),
+        "razorpay_subscription_status": doc.get("razorpay_subscription_status"),
         "last_payment_id": doc.get("last_payment_id"),
         "last_payment_at": doc.get("last_payment_at"),
         "needs_payment": status in ("expired", "none") or doc.get("payment_status") in ("failed", "grace"),
@@ -96,9 +123,9 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     """
     if body.payment_method not in ("card", "upi", "netbanking", "wallet"):
         raise HTTPException(status_code=400, detail="Please choose a valid payment option.")
-    price = compute_price(body.tables)
     now = datetime.now(timezone.utc)
     existing, current_status = await refresh_subscription_status(sess["restaurant_id"])
+    price = compute_price_for_restaurant(body.tables, existing)
     current_tables = existing.get("subscription_tables")
 
     # --- First-time / skipped: start trial only (no payment yet) ---
@@ -177,20 +204,30 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     cycle_past = bool(next_dt and next_dt <= now)
 
     if increasing and (cycle_past or current_status == "active"):
-        # Require payment to apply more tables now
+        # Mid-cycle upgrade: prorate extra tables for remaining days; keep cycle end
+        prorate = compute_upgrade_proration(int(current_tables), body.tables, next_cycle_iso, now, restaurant=existing)
         await rest_svc.update_restaurant(sess["restaurant_id"], {
             "pending_checkout_tables": body.tables,
+            "pending_checkout_kind": prorate["kind"],
+            "pending_checkout_preserve_cycle": prorate["preserve_cycle"],
+            "pending_checkout_next_cycle": prorate.get("next_cycle_start"),
+            "pending_checkout_amount_paise": prorate["amount_paise"],
             "payment_method": body.payment_method,
             "payment_status": "awaiting_upgrade_payment",
         })
         return {
             "success": True,
-            "applied": "awaiting_payment",
+            "applied": "upgrade_proration" if prorate["preserve_cycle"] else "awaiting_payment",
             "needs_payment": True,
             "current_tables": current_tables,
             "pending_tables": body.tables,
-            **price,
-            "message": "Pay now to activate the higher table count.",
+            "proration": prorate,
+            "status": current_status,
+            "message": prorate.get("message"),
+            "tables": body.tables,
+            "subtotal": prorate["subtotal"],
+            "gst_amount": prorate["gst_amount"],
+            "total_with_tax": prorate["total_with_tax"],
         }
 
     pending_update = {
