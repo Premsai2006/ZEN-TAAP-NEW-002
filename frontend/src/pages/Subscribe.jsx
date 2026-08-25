@@ -282,14 +282,18 @@ export default function Subscribe() {
           }
         },
         modal: {
-          ondismiss: () =>
+          ondismiss: async () => {
+            try {
+              await api.post("/payments/abandon-checkout");
+            } catch { /* keep local messaging even if abandon fails */ }
             showPayResult({
               ok: false,
               title: "Payment cancelled",
               message: needsPay
-                ? "Payment cancelled — nothing was charged. Your plan is unchanged."
+                ? "Payment cancelled — nothing was charged. Your existing plan is unchanged."
                 : "Payment cancelled — you can set up autopay later from this page.",
-            }),
+            });
+          },
         },
       }).open();
     } catch (err) {

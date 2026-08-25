@@ -71,6 +71,51 @@ async def cancel_subscription_at_cycle_end(subscription_id: Optional[str]) -> bo
     return await cancel_subscription_now(subscription_id, at_cycle_end=True)
 
 
+async def abandon_pending_checkout(restaurant_id: str) -> dict:
+    """
+    User closed Razorpay without paying.
+    Cancel the unpaid pending subscription only; never touch the live mandate.
+    """
+    doc = await rest_svc.require_restaurant_id(restaurant_id)
+    pending = (doc.get("pending_checkout_subscription_id") or "").strip()
+    live = (doc.get("razorpay_subscription_id") or "").strip()
+    cancelled_pending = False
+    if pending and pending != live:
+        cancelled_pending = await cancel_subscription_now(pending, at_cycle_end=False)
+    elif pending and pending == live:
+        # Expired-renew path stored pending as live id before pay — cancel only if not active access
+        status = str(doc.get("subscription_status") or "").lower()
+        if status not in ("active", "trial"):
+            cancelled_pending = await cancel_subscription_now(pending, at_cycle_end=False)
+            live = ""
+
+    clear = {
+        "pending_checkout_tables": None,
+        "pending_checkout_order_id": None,
+        "pending_checkout_amount_paise": None,
+        "pending_checkout_subscription_id": None,
+        "pending_checkout_kind": None,
+        "pending_checkout_preserve_cycle": None,
+        "pending_checkout_next_cycle": None,
+        "pending_razorpay_plan_tables": None,
+        "previous_razorpay_subscription_id": None,
+    }
+    # If we wiped an unpaid-only subscription id on expired renew, clear it
+    if pending and pending == (doc.get("razorpay_subscription_id") or "").strip():
+        status = str(doc.get("subscription_status") or "").lower()
+        if status not in ("active", "trial"):
+            clear["razorpay_subscription_id"] = None
+            clear["autopay_enabled"] = False
+            clear["autopay_ready"] = False
+
+    await rest_svc.update_restaurant(restaurant_id, clear)
+    return {
+        "cancelled_pending": cancelled_pending,
+        "pending_subscription_id": pending or None,
+        "kept_live_subscription_id": live if live and live != pending else (live or None),
+    }
+
+
 async def update_subscription_plan(restaurant_id: str, tables: int) -> Optional[str]:
     """
     Try to point an existing Razorpay subscription at the new table-tier plan.
@@ -203,9 +248,8 @@ async def create_upgrade_subscription(
             start_at = ts
 
     old_sub = (doc.get("razorpay_subscription_id") or "").strip()
-    if old_sub:
-        # Stop old lower mandate after this cycle; new mandate takes over
-        await cancel_subscription_now(old_sub, at_cycle_end=True)
+    # Do NOT cancel the live mandate until the upgrade payment succeeds.
+    # Cancelling here + a Razorpay webhook was wiping active plans when users closed checkout.
 
     plan_id = await get_plan_id_for_restaurant(doc, int(tables))
     customer_id = await ensure_customer(restaurant_id)
@@ -236,6 +280,7 @@ async def create_upgrade_subscription(
             "product": "zentaap",
             "current_tables": str(current),
             "addon_paise": str(addon_paise),
+            "previous_subscription_id": old_sub or "",
         },
     }
     if start_at:
@@ -252,7 +297,8 @@ async def create_upgrade_subscription(
             "pending_checkout_kind": "upgrade_proration",
             "pending_checkout_preserve_cycle": preserve,
             "pending_checkout_next_cycle": next_cycle_iso,
-            "razorpay_subscription_id": sub["id"],
+            # Keep current live mandate id until pay succeeds
+            "previous_razorpay_subscription_id": old_sub or doc.get("previous_razorpay_subscription_id"),
             "razorpay_plan_id": plan_id,
             "pending_razorpay_plan_tables": int(tables),
         },
@@ -301,8 +347,10 @@ async def create_checkout_subscription(
 
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     old_sub = (doc.get("razorpay_subscription_id") or "").strip()
-    # Replace any previous mandate so renew/expired always gets a fresh monthly subscription
-    if replace_existing and old_sub:
+    status = str(doc.get("subscription_status") or "").lower()
+    # Only kill the old Razorpay sub when renewing an expired/inactive account.
+    # Never cancel a live active mandate before the new checkout is paid.
+    if replace_existing and old_sub and status not in ("active", "trial"):
         await cancel_subscription_now(old_sub, at_cycle_end=False)
 
     plan_id = await get_plan_id_for_restaurant(doc, int(tables))
@@ -322,6 +370,7 @@ async def create_checkout_subscription(
             "kind": "monthly_mandate",
             "product": "zentaap",
             "billing_override": "1" if price.get("billing_override") else "0",
+            "previous_subscription_id": old_sub if status in ("active", "trial") else "",
         },
     }
     # Optional future start (e.g. after mid-cycle upgrade) — still collects mandate auth now
@@ -330,20 +379,25 @@ async def create_checkout_subscription(
 
     sub = client.subscription.create(payload)
 
-    await rest_svc.update_restaurant(
-        restaurant_id,
-        {
-            "pending_checkout_tables": int(tables),
-            "pending_checkout_subscription_id": sub["id"],
-            "pending_checkout_amount_paise": amount_paise,
-            "pending_checkout_kind": "monthly_mandate",
-            "pending_checkout_preserve_cycle": False,
-            "pending_checkout_next_cycle": None,
-            "razorpay_subscription_id": sub["id"],
-            "razorpay_plan_id": plan_id,
-            "pending_razorpay_plan_tables": int(tables),
-        },
-    )
+    update = {
+        "pending_checkout_tables": int(tables),
+        "pending_checkout_subscription_id": sub["id"],
+        "pending_checkout_amount_paise": amount_paise,
+        "pending_checkout_kind": "monthly_mandate",
+        "pending_checkout_preserve_cycle": False,
+        "pending_checkout_next_cycle": None,
+        "razorpay_plan_id": plan_id,
+        "pending_razorpay_plan_tables": int(tables),
+    }
+    if status in ("active", "trial") and old_sub:
+        # Keep live mandate until pay succeeds
+        update["previous_razorpay_subscription_id"] = old_sub
+    else:
+        # Expired/new: pending sub becomes the tracked id after pay; store pending only for now
+        update["razorpay_subscription_id"] = sub["id"]
+        update["previous_razorpay_subscription_id"] = None
+
+    await rest_svc.update_restaurant(restaurant_id, update)
 
     desc = (
         f"ZenTaap DEMO mandate · ₹{amount_paise/100:.0f}/mo"

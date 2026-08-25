@@ -17,6 +17,8 @@ from app.services.razorpay_subscriptions import (
     create_upgrade_subscription,
     verify_subscription_signature,
     fetch_subscription,
+    cancel_subscription_now,
+    abandon_pending_checkout,
 )
 from app.database import db
 from app.services.subscription_access import refresh_subscription_status
@@ -236,6 +238,21 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
         payment_kind=payment_kind,
     )
 
+    # Only AFTER successful pay: stop the previous lower mandate (upgrade/renew replace)
+    prev_sub = (
+        (doc.get("previous_razorpay_subscription_id") or "").strip()
+        or (
+            (doc.get("razorpay_subscription_id") or "").strip()
+            if (doc.get("razorpay_subscription_id") or "") != body.razorpay_subscription_id
+            else ""
+        )
+    )
+    if prev_sub and prev_sub != body.razorpay_subscription_id:
+        await cancel_subscription_now(
+            prev_sub,
+            at_cycle_end=(payment_kind == "upgrade_proration"),
+        )
+
     sub_meta = fetch_subscription(body.razorpay_subscription_id) or {}
     sub_status = str(sub_meta.get("status") or "").lower()
     mandate_ready = sub_status in ("active", "authenticated")
@@ -248,6 +265,7 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
         "pending_checkout_kind": None,
         "pending_checkout_preserve_cycle": None,
         "pending_checkout_next_cycle": None,
+        "previous_razorpay_subscription_id": None,
         "razorpay_subscription_id": body.razorpay_subscription_id,
         "autopay_enabled": True,
         "autopay_ready": mandate_ready,
@@ -351,6 +369,21 @@ async def verify_razorpay_payment(body: VerifyPaymentBody, sess=Depends(require_
     }
 
 
+@router.post("/abandon-checkout")
+async def abandon_checkout(sess=Depends(require_manager)):
+    """User closed Razorpay without paying — drop pending unpaid sub; keep existing plan."""
+    rid = sess["restaurant_id"]
+    result = await abandon_pending_checkout(rid)
+    doc, status = await refresh_subscription_status(rid)
+    return {
+        "success": True,
+        "abandoned": result,
+        "status": status,
+        "tables": doc.get("subscription_tables"),
+        "message": "Checkout cancelled. Your existing plan is unchanged.",
+    }
+
+
 @router.get("/history")
 async def payment_history(sess=Depends(require_manager)):
     rid = sess["restaurant_id"]
@@ -409,12 +442,12 @@ async def razorpay_webhook(request: Request):
         if rid:
             rest_doc = await rest_svc.get_by_id(rid) or {}
             kind = notes.get("kind") or rest_doc.get("pending_checkout_kind") or "subscription"
-            # Monthly mandate renewals always start a new cycle; only upgrade_proration keeps dates
+            # Monthly renew charges start a new cycle; upgrade auth keeps current cycle dates
             is_upgrade = kind == "upgrade_proration" or (
                 event == "payment.captured"
                 and str(notes.get("preserve_cycle") or "").strip() in ("1", "true", "True")
             )
-            if event in ("subscription.charged", "subscription.activated"):
+            if event == "subscription.charged":
                 is_upgrade = False
                 kind = "monthly_mandate"
             preserve = bool(is_upgrade)
@@ -434,13 +467,24 @@ async def razorpay_webhook(request: Request):
                 next_cycle_override=next_keep,
                 payment_kind=kind if preserve else "monthly_mandate",
             )
+            prev = (
+                (rest_doc.get("previous_razorpay_subscription_id") or "").strip()
+                or (notes.get("previous_subscription_id") or "").strip()
+            )
+            if prev and sub_id and prev != sub_id:
+                await cancel_subscription_now(
+                    prev,
+                    at_cycle_end=(kind == "upgrade_proration" or preserve),
+                )
             clear = {
                 "pending_checkout_tables": None,
                 "pending_checkout_order_id": None,
                 "pending_checkout_amount_paise": None,
+                "pending_checkout_subscription_id": None,
                 "pending_checkout_kind": None,
                 "pending_checkout_preserve_cycle": None,
                 "pending_checkout_next_cycle": None,
+                "previous_razorpay_subscription_id": None,
                 "autopay_enabled": True,
                 "autopay_ready": True,
             }
@@ -472,18 +516,60 @@ async def razorpay_webhook(request: Request):
                     "$or": [
                         {"razorpay_subscription_id": sub_id},
                         {"pending_checkout_subscription_id": sub_id},
+                        {"previous_razorpay_subscription_id": sub_id},
                     ]
                 },
-                {"_id": 0, "id": 1},
+                {"_id": 0, "id": 1, "subscription_status": 1, "razorpay_subscription_id": 1,
+                 "pending_checkout_subscription_id": 1, "previous_razorpay_subscription_id": 1},
             )
             rid = doc.get("id") if doc else None
+        else:
+            doc = await rest_svc.get_by_id(rid) if rid else None
+
         if rid:
-            updates = {"payment_status": "failed"}
-            if event in ("subscription.halted", "subscription.cancelled"):
-                updates["subscription_status"] = "expired"
-                updates["autopay_enabled"] = False
-                updates["autopay_ready"] = False
-            await rest_svc.update_restaurant(rid, updates)
+            rest = doc or await rest_svc.get_by_id(rid) or {}
+            pending_sub = (rest.get("pending_checkout_subscription_id") or "").strip()
+            live_sub = (rest.get("razorpay_subscription_id") or "").strip()
+            prev_sub = (rest.get("previous_razorpay_subscription_id") or "").strip()
+            status_now = str(rest.get("subscription_status") or "").lower()
+
+            # Pending unpaid checkout cancelled / failed — clear pending only
+            if sub_id and sub_id == pending_sub:
+                await rest_svc.update_restaurant(rid, {
+                    "pending_checkout_tables": None,
+                    "pending_checkout_order_id": None,
+                    "pending_checkout_amount_paise": None,
+                    "pending_checkout_subscription_id": None,
+                    "pending_checkout_kind": None,
+                    "pending_checkout_preserve_cycle": None,
+                    "pending_checkout_next_cycle": None,
+                    "pending_razorpay_plan_tables": None,
+                })
+                logger.info("Cleared abandoned pending checkout for %s sub=%s", rid, sub_id)
+            # Expected cancel of previous mandate after upgrade — do not expire access
+            elif sub_id and sub_id == prev_sub:
+                await rest_svc.update_restaurant(rid, {"previous_razorpay_subscription_id": None})
+                logger.info("Previous mandate cancelled after upgrade rid=%s sub=%s", rid, sub_id)
+            elif event == "subscription.halted" and sub_id and sub_id == live_sub:
+                # Autopay broken on current mandate — turn off autopay but keep paid cycle access
+                await rest_svc.update_restaurant(rid, {
+                    "payment_status": "failed",
+                    "autopay_enabled": False,
+                    "autopay_ready": False,
+                    "razorpay_subscription_status": "halted",
+                })
+            elif event == "subscription.cancelled" and sub_id and sub_id == live_sub:
+                # Never wipe an active/trial cycle just because Razorpay cancelled a sub.
+                # Access expires via next_cycle_start in refresh_subscription_status.
+                await rest_svc.update_restaurant(rid, {
+                    "autopay_enabled": False,
+                    "autopay_ready": False,
+                    "razorpay_subscription_status": "cancelled",
+                    "payment_status": "failed" if status_now not in ("active", "trial") else rest.get("payment_status"),
+                })
+            elif event == "payment.failed":
+                await rest_svc.update_restaurant(rid, {"payment_status": "failed"})
+
             await record_payment(
                 restaurant_id=rid,
                 payment_id=entity.get("id") if event == "payment.failed" else None,
