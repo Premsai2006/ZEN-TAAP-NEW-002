@@ -60,15 +60,38 @@ async def ensure_plan_for_tables(
         raise RuntimeError("Razorpay is not configured")
 
     key = _plan_key(tables, amount_paise=amount_paise, override=override)
-    existing = await db[COLLECTION].find_one({"plan_key": key}, {"_id": 0})
-    if existing and existing.get("plan_id") and existing.get("amount_paise") == amount_paise:
-        return existing["plan_id"]
-    # legacy lookup
-    if not override:
-        legacy = await db[COLLECTION].find_one({"tables": int(tables), "override": {"$ne": True}}, {"_id": 0})
-        if legacy and legacy.get("plan_id") and legacy.get("amount_paise") == amount_paise:
-            await db[COLLECTION].update_one({"tables": int(tables)}, {"$set": {"plan_key": key}})
-            return legacy["plan_id"]
+
+    async def _cached_valid() -> Optional[str]:
+        existing = await db[COLLECTION].find_one({"plan_key": key}, {"_id": 0})
+        if not existing and not override:
+            existing = await db[COLLECTION].find_one(
+                {"tables": int(tables), "override": {"$ne": True}}, {"_id": 0}
+            )
+        if not existing or not existing.get("plan_id"):
+            return None
+        if existing.get("amount_paise") != amount_paise:
+            return None
+        try:
+            client.plan.fetch(existing["plan_id"])
+            # backfill plan_key on legacy rows
+            if existing.get("plan_key") != key:
+                await db[COLLECTION].update_one(
+                    {"plan_id": existing["plan_id"]}, {"$set": {"plan_key": key}}
+                )
+            return existing["plan_id"]
+        except Exception as exc:
+            logger.warning(
+                "Stale Razorpay plan_id=%s key=%s (%s) — recreating",
+                existing.get("plan_id"), key, exc,
+            )
+            await db[COLLECTION].delete_many(
+                {"$or": [{"plan_key": key}, {"plan_id": existing.get("plan_id")}]}
+            )
+            return None
+
+    cached = await _cached_valid()
+    if cached:
+        return cached
 
     name = (
         f"ZenTaap DEMO mandate ₹{amount_paise/100:.0f}"

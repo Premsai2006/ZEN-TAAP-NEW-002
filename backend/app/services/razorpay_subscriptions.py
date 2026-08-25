@@ -19,12 +19,17 @@ SUBSCRIPTION_TOTAL_COUNT = 120
 async def ensure_customer(restaurant_id: str) -> str:
     doc = await rest_svc.require_restaurant_id(restaurant_id)
     existing = (doc.get("razorpay_customer_id") or "").strip()
-    if existing:
-        return existing
-
     client = razorpay_client()
     if not client:
         raise RuntimeError("Razorpay is not configured")
+
+    if existing:
+        try:
+            client.customer.fetch(existing)
+            return existing
+        except Exception as exc:
+            logger.warning("Stale razorpay_customer_id=%s — recreating (%s)", existing, exc)
+            await rest_svc.update_restaurant(restaurant_id, {"razorpay_customer_id": None})
 
     name = doc.get("restaurant_name") or doc.get("manager_name") or "ZenTaap Restaurant"
     email = (doc.get("email") or "").strip() or None
