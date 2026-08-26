@@ -59,7 +59,7 @@ export default function TablesSection({
     toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
       description: isExpired
         ? "Renew your subscription first, then download clear table QRs."
-        : "Start a trial or subscribe to download table QRs.",
+        : "Subscribe to download table QRs.",
       id: "qr-locked",
     });
     if (onOpenSubscribe) onOpenSubscribe();
@@ -308,7 +308,7 @@ export default function TablesSection({
                 <div className="qr-paywall-sub">
                   {isExpired
                     ? "Renew your subscription first, then download clear table QRs."
-                    : "Start a trial or subscribe to download clear table QRs."}
+                    : "Subscribe to download clear table QRs."}
                 </div>
                 <button
                   type="button"

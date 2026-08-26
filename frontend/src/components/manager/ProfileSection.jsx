@@ -251,7 +251,7 @@ export default function ProfileSection({ onRefresh, onOpenSubscribe }) {
         ) : (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div style={{ color: "var(--muted)", fontSize: 13 }}>
-              You don&apos;t have an active subscription yet. Start with a 4-day free trial.
+              You don&apos;t have an active subscription yet. Pay to unlock — first-time subscribers get 4 extra days on the first month.
             </div>
             <button
               type="button"

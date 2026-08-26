@@ -40,7 +40,8 @@ class TestSubscriptionShape:
         for k in ("tables", "subtotal", "gst", "total", "status",
                   "trial_start", "trial_end", "payment_method",
                   "pending_tables", "pending_subtotal", "pending_total",
-                  "cycle_start", "next_cycle_start"):
+                  "cycle_start", "next_cycle_start",
+                  "intro_trial_eligible", "needs_payment"):
             assert k in d, f"missing key '{k}' in /api/subscription response (got {list(d.keys())})"
 
 
@@ -56,31 +57,26 @@ class TestSubscriptionStateMachine:
         assert r.status_code == 400
 
     def test_post_then_get_persists_with_cycle_fields(self, s):
-        # Ensure there is some subscription state; if 'none', this triggers immediate trial.
         cur = s.get(f"{API}/subscription").json()
         if cur.get("status") in (None, "none", "skipped") or not cur.get("tables"):
             r = s.post(f"{API}/subscription", json={"tables": 15, "payment_method": "upi"}, timeout=15)
             assert r.status_code == 200, r.text
             d = r.json()
-            assert d.get("applied") == "immediate"
-            assert "cycle_start" in d and "next_cycle_start" in d
-            assert "trial_start" in d and "trial_end" in d
-            # next_cycle ~30 days after now
-            ncs = datetime.fromisoformat(d["next_cycle_start"].replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
-            delta_days = (ncs - now).days
-            assert 28 <= delta_days <= 31, f"next_cycle_start ~30d expected, got {delta_days}d"
+            assert d.get("applied") == "awaiting_payment"
+            assert d.get("needs_payment") is True
 
-        # After post (or pre-existing), the sub should be active/trial.
         post_state = s.get(f"{API}/subscription").json()
+        # Access starts only after payment; unpaid first-time stays none/skipped/expired
+        if post_state["status"] in ("none", "skipped", "expired"):
+            assert post_state.get("has_access") is False
+            return
         assert post_state["status"] in ("trial", "active")
-        # cycle_start may be None for legacy subs created before iteration-6 deferred fields existed.
-        # If we just created it via "immediate" path, both fields must be present (already validated above).
 
     def test_change_tables_returns_next_cycle_deferred(self, s):
         # Read current
         cur = s.get(f"{API}/subscription").json()
-        assert cur["status"] in ("trial", "active"), "Prereq: existing sub must be active/trial"
+        if cur["status"] not in ("trial", "active"):
+            pytest.skip("Requires an already-paid subscription")
         current_tables = cur["tables"]
         new_tables = current_tables + 5 if current_tables + 5 <= 60 else current_tables - 5
 
@@ -102,6 +98,8 @@ class TestSubscriptionStateMachine:
 
     def test_post_with_same_tables_returns_no_change_clears_pending(self, s):
         cur = s.get(f"{API}/subscription").json()
+        if cur["status"] not in ("trial", "active"):
+            pytest.skip("Requires an already-paid subscription")
         current_tables = cur["tables"]
         r = s.post(f"{API}/subscription",
                    json={"tables": current_tables, "payment_method": "card"}, timeout=15)

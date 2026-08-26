@@ -69,7 +69,10 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
   }, [tables, existing?.tables, existing?.status, existing?.next_cycle_start]);
 
   const hasActive = existing && existing.tables && ["trial", "active"].includes(existing.status);
-  const canStartTrial = !existing || !existing.status || ["none", "skipped"].includes(existing.status);
+  const introEligible = Boolean(
+    existing?.intro_trial_eligible
+    ?? (!existing?.status || ["none", "skipped"].includes(existing.status))
+  );
   const isExpired = existing?.status === "expired";
   const isChangeRequest = hasActive && tables !== existing.tables;
   const minT = pricing?.min_tables ?? 10;
@@ -116,17 +119,17 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
     []
   );
 
-  const trialEnd = useMemo(() => {
-    // For active/trial subs, use the backend-stored trial_end; otherwise compute new (+4d).
-    if (existing?.trial_end) {
+  const introAutopayLabel = useMemo(() => {
+    const raw = existing?.preview_first_autopay_at;
+    if (raw) {
       try {
-        return new Date(existing.trial_end).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+        return new Date(raw).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
       } catch (err) {
-        // Invalid stored ISO string — fall through to computed (+4d). Log so we can spot bad data.
-        console.warn("Subscribe.trialEnd: bad existing.trial_end", existing.trial_end, err);
+        console.warn("Subscribe.introAutopayLabel: bad preview_first_autopay_at", raw, err);
       }
     }
     const d = new Date();
+    d.setMonth(d.getMonth() + 1);
     d.setDate(d.getDate() + 4);
     return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   }, [existing]);
@@ -146,7 +149,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
       toast.message(isExpired ? "Pay to unlock your QR codes" : "Subscribe to unlock QR codes", {
         description: isExpired
           ? "Renew your subscription first, then download clear table QRs."
-          : "Complete payment or start a trial to download QRs.",
+          : "Complete payment to download QRs.",
         id: "sub-qr-locked",
       });
       return;
@@ -199,18 +202,10 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
         goDashboard();
         return;
       }
-      if (planResp.applied === "trial") {
-        toast.success(`Free trial started — ends ${fmtDate(planResp.trial_end)}. Pay anytime before it ends.`);
-      }
-
       const needsPay =
         planResp.needs_payment ||
         planResp.applied === "awaiting_payment" ||
         planResp.applied === "upgrade_proration";
-      if (!needsPay && planResp.applied === "trial") {
-        goDashboard();
-        return;
-      }
       if (!needsPay && planResp.applied === "immediate") {
         toast.success(`Plan updated to ${tables} tables.`);
         goDashboard();
@@ -272,11 +267,14 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                 goManager: true,
               });
             } else {
+              const introPaid = checkout.intro_trial || introEligible;
               showPayResult({
                 ok: true,
                 title: "Payment successful!",
                 message: verified?.message
-                  || "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle.",
+                  || (introPaid
+                    ? "Your first payment is done. This billing period includes 4 extra days; later months are billed monthly."
+                    : "Your first payment is done. ZenTaap will auto-deduct the monthly fee every billing cycle."),
                 detail: verified?.next_cycle_start
                   ? `Next auto-debit on ${fmtDate(verified.next_cycle_start)} · ${tables} tables.`
                   : "You can turn autopay off anytime from Subscription.",
@@ -401,18 +399,19 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
           </button>
         </div>
 
-        {/* Trial banner — only for first-time / eligible trial (issue #5) */}
-        {canStartTrial && (
+        {/* Intro bonus — first successful payment only */}
+        {introEligible && !hasActive && (
           <div className="trial-banner-highlight" data-testid="trial-banner" style={{ marginBottom: 22 }}>
             <div className="trial-banner-icon">
               <Gift size={26} />
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>
-                4-day FREE trial
+                4 extra days on your first month
               </div>
               <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-                You won&apos;t be charged for the 4 days. Trial ends on <b>{trialEnd}</b>.
+                Pay today to unlock. Your first billing period includes 4 extra days, so the next AutoPay is on{" "}
+                <b>{introAutopayLabel}</b>. From the second month, billing is monthly — no extra trial.
               </div>
             </div>
           </div>
@@ -593,7 +592,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                         ? "One QR per table. Download, laminate & place on each table."
                         : isExpired
                           ? "Subscription expired — pay to unlock clear downloadable QRs."
-                          : "Pay or start a trial to unlock clear downloadable QRs."}
+                          : "Pay to unlock clear downloadable QRs."}
                     </div>
                   </div>
                 </div>
@@ -652,7 +651,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                     <div className="qr-paywall-sub">
                       {isExpired
                         ? "Renew your subscription first, then download clear table QRs."
-                        : "Complete payment or start a trial to download clear table QRs."}
+                        : "Complete payment to download clear table QRs."}
                     </div>
                   </div>
                 )}
@@ -779,9 +778,9 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                     ? (isChangeRequest
                         ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
                         : `Manage plan · ${fmtRupee(pricing?.total_with_tax)}/mo`)
-                    : isExpired
-                      ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`
-                      : `Start 4-Day Free Trial · ${fmtRupee(pricing?.total_with_tax)} /mo after`}
+                    : introEligible
+                      ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · includes 4 extra days`
+                      : `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
           <ShieldCheck size={12} /> Secured by Razorpay · Monthly mandate / UPI Autopay · Cancel anytime

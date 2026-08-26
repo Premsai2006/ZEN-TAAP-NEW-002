@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
+from app.config import TRIAL_DAYS
 from app.services import restaurants as rest_svc
 from app.services.pricing import compute_price, compute_price_for_restaurant, hydrate_pricing
 from app.services.razorpay_client import razorpay_client
 from app.services.razorpay_plans import get_plan_id_for_tables, get_plan_id_for_restaurant
+from app.services.subscription_access import first_paid_cycle_end, intro_trial_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +342,10 @@ async def create_checkout_subscription(
     """
     Create a Razorpay Subscription (monthly mandate / autopay).
     First Checkout payment authorises the mandate; later charges auto-debit.
+
+    First-ever payment: charge the monthly amount now via addon, and set start_at
+    to one calendar month + TRIAL_DAYS so AutoPay's next debit includes the
+    intro bonus. Renewals charge the plan on the normal monthly cycle.
     Returns (checkout_payload_for_frontend, raw_subscription).
     """
     await hydrate_pricing()
@@ -358,6 +365,14 @@ async def create_checkout_subscription(
     customer_id = await ensure_customer(restaurant_id)
     price = compute_price_for_restaurant(int(tables), doc)
     amount_paise = int(price["amount_paise"])
+    intro = intro_trial_eligible(doc) and status not in ("active", "trial")
+
+    intro_start_at = start_at
+    intro_next_iso = None
+    if intro and not intro_start_at:
+        intro_end = first_paid_cycle_end(datetime.now(timezone.utc), intro=True)
+        intro_start_at = int(intro_end.timestamp())
+        intro_next_iso = intro_end.isoformat()
 
     payload = {
         "plan_id": plan_id,
@@ -368,15 +383,26 @@ async def create_checkout_subscription(
         "notes": {
             "restaurant_id": restaurant_id,
             "tables": str(int(tables)),
-            "kind": "monthly_mandate",
+            "kind": "first_cycle_intro" if intro else "monthly_mandate",
             "product": "zentaap",
             "billing_override": "1" if price.get("billing_override") else "0",
             "previous_subscription_id": old_sub if status in ("active", "trial") else "",
+            "intro_trial": "1" if intro else "0",
         },
     }
-    # Optional future start (e.g. after mid-cycle upgrade) — still collects mandate auth now
-    if start_at and int(start_at) > int(time.time()) + 60:
-        payload["start_at"] = int(start_at)
+    if intro:
+        payload["addons"] = [
+            {
+                "item": {
+                    "name": f"First month + {TRIAL_DAYS}-day intro",
+                    "amount": max(100, amount_paise),
+                    "currency": "INR",
+                }
+            }
+        ]
+    # Optional future start (intro bonus, or after mid-cycle upgrade) — still collects mandate auth now
+    if intro_start_at and int(intro_start_at) > int(time.time()) + 60:
+        payload["start_at"] = int(intro_start_at)
 
     sub = client.subscription.create(payload)
 
@@ -384,9 +410,9 @@ async def create_checkout_subscription(
         "pending_checkout_tables": int(tables),
         "pending_checkout_subscription_id": sub["id"],
         "pending_checkout_amount_paise": amount_paise,
-        "pending_checkout_kind": "monthly_mandate",
+        "pending_checkout_kind": "first_cycle_intro" if intro else "monthly_mandate",
         "pending_checkout_preserve_cycle": False,
-        "pending_checkout_next_cycle": None,
+        "pending_checkout_next_cycle": intro_next_iso,
         "razorpay_plan_id": plan_id,
         "pending_razorpay_plan_tables": int(tables),
     }
@@ -405,7 +431,11 @@ async def create_checkout_subscription(
         if price.get("billing_override")
         else f"ZenTaap {tables} tables — monthly autopay mandate"
     )
-    if start_at:
+    if intro:
+        desc = (
+            f"Pay ₹{amount_paise/100:.0f} now · first AutoPay in 1 month + {TRIAL_DAYS} extra days"
+        )
+    elif intro_start_at:
         desc = f"{desc} (starts next cycle)"
 
     checkout = {
@@ -422,8 +452,11 @@ async def create_checkout_subscription(
         "mandate": True,
         "autopay": True,
         "billing_override": bool(price.get("billing_override")),
+        "intro_trial": intro,
+        "intro_bonus_days": TRIAL_DAYS if intro else 0,
         "description": desc,
-        "start_at": start_at,
+        "start_at": intro_start_at if intro else start_at,
+        "next_cycle_start": intro_next_iso,
     }
     return checkout, sub
 

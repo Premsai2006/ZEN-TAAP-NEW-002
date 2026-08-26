@@ -12,6 +12,8 @@ from app.services.subscription_access import (
     advance_cycle_to_future,
     refresh_subscription_status,
     has_access_status,
+    intro_trial_eligible,
+    first_paid_cycle_end,
     BILLING_CYCLE_DAYS,
 )
 
@@ -112,7 +114,18 @@ async def get_subscription(sess=Depends(require_manager)):
         "razorpay_subscription_status": doc.get("razorpay_subscription_status"),
         "last_payment_id": doc.get("last_payment_id"),
         "last_payment_at": doc.get("last_payment_at"),
-        "needs_payment": status in ("expired", "none") or doc.get("payment_status") in ("failed", "grace"),
+        "trial_used": bool(doc.get("trial_used")),
+        "intro_trial_eligible": intro_trial_eligible(doc),
+        "intro_bonus_days": TRIAL_DAYS if intro_trial_eligible(doc) else 0,
+        "preview_first_autopay_at": (
+            first_paid_cycle_end(now, intro=True).isoformat()
+            if intro_trial_eligible(doc)
+            else None
+        ),
+        "needs_payment": (
+            status in ("expired", "none", "skipped")
+            or doc.get("payment_status") in ("failed", "grace", "awaiting_payment")
+        ),
     }
 
 
@@ -120,8 +133,8 @@ async def get_subscription(sess=Depends(require_manager)):
 async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)):
     """
     Plan selection:
-    - none/skipped → start free trial (no payment, no last_payment_at)
-    - expired → stash plan intent; stays expired until /payments/verify
+    - none/skipped/expired → stash plan intent; access starts only after successful payment
+    - First successful payment (see payment_activate) adds TRIAL_DAYS to the first cycle
     - active mid-cycle table change → pending until next cycle (no free upgrade)
     """
     # Razorpay Checkout handles method selection; keep a loose label for records.
@@ -135,40 +148,9 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
     price = compute_price_for_restaurant(body.tables, existing)
     current_tables = existing.get("subscription_tables")
 
-    # --- First-time / skipped: start trial only (no payment yet) ---
-    if current_status in ("none", "skipped"):
-        trial_end = now + timedelta(days=TRIAL_DAYS)
-        update = {
-            "subscription_tables": body.tables,
-            "subscription_subtotal": price["subtotal"],
-            "subscription_gst": price["gst_amount"],
-            "subscription_total": price["total_with_tax"],
-            "subscription_status": "trial",
-            "payment_status": "trial",
-            "trial_start": now.isoformat(),
-            "trial_end": trial_end.isoformat(),
-            "cycle_start": now.isoformat(),
-            "next_cycle_start": (now + timedelta(days=BILLING_CYCLE_DAYS)).isoformat(),
-            "payment_method": body.payment_method,
-            "pending_tables": None,
-            "pending_subtotal": None,
-            "pending_total": None,
-        }
-        await rest_svc.update_restaurant(sess["restaurant_id"], update)
-        return {
-            "success": True,
-            "applied": "trial",
-            "needs_payment": False,
-            **price,
-            "trial_start": update["trial_start"],
-            "trial_end": update["trial_end"],
-            "cycle_start": update["cycle_start"],
-            "next_cycle_start": update["next_cycle_start"],
-            "status": "trial",
-        }
-
-    # --- Expired: save plan intent, require payment before active ---
-    if current_status == "expired":
+    # --- First-time / skipped / expired: save plan, require payment before access ---
+    if current_status in ("none", "skipped", "expired"):
+        intro = intro_trial_eligible(existing)
         update = {
             "pending_checkout_tables": body.tables,
             "subscription_tables": body.tables,
@@ -176,8 +158,8 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
             "subscription_gst": price["gst_amount"],
             "subscription_total": price["total_with_tax"],
             "payment_method": body.payment_method,
-            # Keep expired until verify
-            "subscription_status": "expired",
+            # Keep current status (none/skipped/expired) until payment succeeds
+            "subscription_status": current_status,
             "payment_status": "awaiting_payment",
         }
         await rest_svc.update_restaurant(sess["restaurant_id"], update)
@@ -185,8 +167,13 @@ async def create_subscription(body: SubscribeBody, sess=Depends(require_manager)
             "success": True,
             "applied": "awaiting_payment",
             "needs_payment": True,
+            "intro_trial_eligible": intro,
+            "intro_bonus_days": TRIAL_DAYS if intro else 0,
+            "preview_first_autopay_at": (
+                first_paid_cycle_end(now, intro=True).isoformat() if intro else None
+            ),
             **price,
-            "status": "expired",
+            "status": current_status,
         }
 
     if body.tables == current_tables:

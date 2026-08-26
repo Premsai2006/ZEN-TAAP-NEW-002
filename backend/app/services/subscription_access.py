@@ -1,6 +1,7 @@
 """Subscription access / expiry helpers."""
 from __future__ import annotations
 
+import calendar
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple
 
@@ -19,6 +20,40 @@ def parse_dt(iso: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
     except Exception:
         return None
+
+
+def add_calendar_months(dt: datetime, months: int) -> datetime:
+    """Advance by calendar months, clamping the day if the target month is shorter."""
+    month_index = dt.month - 1 + months
+    year = dt.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
+def first_paid_cycle_end(now: datetime, *, intro: bool) -> datetime:
+    """Next AutoPay date after a successful payment.
+
+    Intro bonus (first payment ever): one calendar month + TRIAL_DAYS.
+    Example: pay 1 Aug → next charge 5 Sep.
+    """
+    end = add_calendar_months(now, 1)
+    if intro:
+        end = end + timedelta(days=TRIAL_DAYS)
+    return end
+
+
+def intro_trial_eligible(doc: Optional[dict]) -> bool:
+    """4 extra days apply only to a restaurant's first successful payment."""
+    d = doc or {}
+    if d.get("trial_used"):
+        return False
+    if d.get("last_payment_at"):
+        return False
+    # Legacy unpaid trial already consumed the intro window.
+    if d.get("trial_start"):
+        return False
+    return True
 
 
 def advance_cycle_to_future(next_cycle_iso: Optional[str], now: datetime) -> str:

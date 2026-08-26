@@ -290,7 +290,11 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
         "message": (
             f"Upgrade unlocked. Autopay is now set for {tables} tables from the next cycle."
             if payment_kind == "upgrade_proration"
-            else "Monthly autopay mandate is active. ZenTaap will auto-deduct each billing cycle."
+            else (
+                "First payment done. This billing period includes 4 extra days; later months are billed monthly."
+                if payment_kind == "first_cycle_intro"
+                else "Monthly autopay mandate is active. ZenTaap will auto-deduct each billing cycle."
+            )
         ),
     }
 

@@ -186,31 +186,21 @@ class TestExploreGate:
 # ---------------- TRIAL FLIP → WRITE SUCCEEDS ----------------
 
 class TestSubscriptionFlipAllowsWrite:
-    def test_post_subscription_then_menu_create(self, mongo):
-        # Activate trial
+    def test_post_subscription_does_not_grant_access_until_payment(self, mongo):
         r = requests.post(f"{API}/subscription", json={"tables": 10, "payment_method": "upi"})
         assert r.status_code == 200, r.text
+        body = r.json()
         sub = requests.get(f"{API}/subscription").json()
+        if sub["status"] in ("none", "skipped", "expired"):
+            assert body.get("applied") == "awaiting_payment"
+            assert body.get("needs_payment") is True
+            assert sub.get("has_access") is False
+            cat_r = requests.post(f"{API}/categories", json={"name": "TEST_Cat12"})
+            assert cat_r.status_code == 402, cat_r.text
+            return
+        # Already paid in this environment
         assert sub["status"] in ("trial", "active")
         assert sub["has_access"] is True
-
-        # Now POST /menu should succeed
-        # First need a category since menu items reference one
-        cat_r = requests.post(f"{API}/categories", json={"name": "TEST_Cat12"})
-        assert cat_r.status_code == 200, cat_r.text
-        cat_id = cat_r.json()["id"]
-
-        item_r = requests.post(f"{API}/menu", json={
-            "name": "TEST_FlipItem", "price": 99.0, "category_id": cat_id
-        })
-        assert item_r.status_code == 200, item_r.text
-        item_id = item_r.json()["id"]
-
-        # Cleanup
-        del_item = requests.delete(f"{API}/menu/{item_id}")
-        assert del_item.status_code in (200, 204)
-        del_cat = requests.delete(f"{API}/categories/{cat_id}")
-        assert del_cat.status_code in (200, 204)
 
 
 # ---------------- OTP (DEMO_MODE not set) ----------------

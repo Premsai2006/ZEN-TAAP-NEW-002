@@ -276,7 +276,7 @@ export default function Manager() {
                   </>
                 ) : (
                   <>
-                    <b>Explore Mode</b> — browse freely. Start a <b>4-day free trial</b> to unlock full features.
+                    <b>Explore Mode</b> — browse freely. Pay to subscribe and unlock full features. First-time subscribers get 4 extra days on the first billing period.
                   </>
                 )}
                 <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }} data-testid="feature-lock-matrix">
@@ -301,7 +301,7 @@ export default function Manager() {
               onClick={() => { setActive("subscribe"); setMobileNav(false); }}
               data-testid="explore-subscribe-btn"
             >
-              {subscription.status === "expired" ? "Pay & Resume" : "Start Free Trial"} <ArrowRight size={14} />
+              {subscription.status === "expired" ? "Pay & Resume" : "Subscribe"} <ArrowRight size={14} />
             </button>
             )}
           </div>

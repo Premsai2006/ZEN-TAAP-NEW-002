@@ -7,7 +7,12 @@ from typing import Optional
 
 from app.database import db
 from app.services.pricing import compute_price, compute_price_for_restaurant
-from app.services.subscription_access import BILLING_CYCLE_DAYS
+from app.services.subscription_access import (
+    BILLING_CYCLE_DAYS,
+    first_paid_cycle_end,
+    intro_trial_eligible,
+    parse_dt,
+)
 from app.services import restaurants as rest_svc
 
 
@@ -98,12 +103,30 @@ async def activate_paid_subscription(
     except Exception:
         tables = doc.get("subscription_tables")
 
+    apply_intro = False
     if preserve_cycle and (next_cycle_override or doc.get("next_cycle_start")):
         next_cycle = next_cycle_override or doc.get("next_cycle_start")
         cycle_start = doc.get("cycle_start") or now.isoformat()
     else:
-        next_cycle = (now + timedelta(days=BILLING_CYCLE_DAYS)).isoformat()
-        cycle_start = now.isoformat()
+        apply_intro = intro_trial_eligible(doc)
+        existing_next = parse_dt(doc.get("next_cycle_start"))
+        already_paid_cycle = (
+            (doc.get("subscription_status") or "") == "active"
+            and bool(doc.get("last_payment_at"))
+            and existing_next is not None
+            and existing_next > now + timedelta(days=1)
+        )
+        if apply_intro:
+            next_cycle = first_paid_cycle_end(now, intro=True).isoformat()
+            cycle_start = now.isoformat()
+        elif already_paid_cycle:
+            # Duplicate webhook (e.g. subscription.activated after payment.captured)
+            # must not rewind an intro-extended first cycle.
+            next_cycle = doc.get("next_cycle_start")
+            cycle_start = doc.get("cycle_start") or now.isoformat()
+        else:
+            next_cycle = (now + timedelta(days=BILLING_CYCLE_DAYS)).isoformat()
+            cycle_start = now.isoformat()
 
     update = {
         "subscription_status": "active",
@@ -113,12 +136,16 @@ async def activate_paid_subscription(
         "last_payment_at": now.isoformat(),
         "cycle_start": cycle_start,
         "next_cycle_start": next_cycle,
+        "trial_used": True,
         "autopay_enabled": bool(enable_autopay or subscription_id),
         "autopay_ready": bool(subscription_id) if subscription_id else bool(doc.get("autopay_ready")),
         "pending_checkout_kind": None,
         "pending_checkout_preserve_cycle": None,
         "pending_checkout_next_cycle": None,
     }
+    if apply_intro:
+        update["trial_start"] = now.isoformat()
+        update["trial_end"] = next_cycle
     if subscription_id:
         update["razorpay_subscription_id"] = subscription_id
 
