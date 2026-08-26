@@ -16,7 +16,7 @@ const fmtDate = (iso) => {
   }
 };
 
-export default function ProfileSection({ onRefresh }) {
+export default function ProfileSection({ onRefresh, onOpenSubscribe }) {
   const navigate = useNavigate();
   const [profile, setProfile] = useState({
     manager_name: "",
@@ -240,7 +240,7 @@ export default function ProfileSection({ onRefresh }) {
             <button
               type="button"
               className="mini-btn"
-              onClick={() => navigate("/subscribe")}
+              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
               data-testid="profile-change-sub-btn"
               style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
             >
@@ -256,7 +256,7 @@ export default function ProfileSection({ onRefresh }) {
             <button
               type="button"
               className="mini-btn"
-              onClick={() => navigate("/subscribe")}
+              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
               data-testid="profile-start-sub-btn"
               style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
             >

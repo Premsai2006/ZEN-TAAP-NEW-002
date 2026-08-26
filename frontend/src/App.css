@@ -114,8 +114,8 @@
 /* Manager Tables → QR grid */
 .tables-qr-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
 }
 .table-qr-card {
   display: flex;
@@ -125,6 +125,187 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px 12px;
+}
+.qr-poster-card {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  color: #161310;
+  border: 2px solid #161310;
+  border-radius: 18px;
+  padding: 16px 12px 0;
+  text-align: center;
+}
+.qr-poster-accent {
+  position: absolute;
+  top: -10px;
+  left: -14px;
+  width: 110px;
+  height: 62px;
+  background: var(--gold);
+  border-radius: 0 0 80% 0;
+  pointer-events: none;
+}
+.qr-poster-logo-wrap {
+  position: relative;
+  z-index: 1;
+  width: 168px;
+  height: 48px;
+  margin: 0 auto 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #F6EFE4;
+}
+.qr-poster-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.qr-poster-cta {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+.qr-poster-cta span {
+  color: var(--gold);
+  font-size: 12px;
+}
+.qr-poster-table {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.qr-poster-rest {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qr-poster-qr {
+  position: relative;
+  background: #fff;
+  padding: 8px;
+  border: 3px solid #161310;
+  border-radius: 12px;
+  margin: 8px 0 12px;
+  line-height: 0;
+}
+.qr-poster-qr-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  background: #F6EFE4;
+  border: 3px solid var(--gold);
+  border-radius: 50%;
+  padding: 5px;
+  box-sizing: border-box;
+}
+.qr-poster-steps {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  width: 100%;
+  gap: 0;
+  margin: 0 0 12px;
+  align-items: start;
+}
+.qr-poster-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+}
+.qr-poster-step + .qr-poster-step {
+  border-left: 1px solid rgba(22, 19, 16, 0.14);
+}
+.qr-poster-step-icon {
+  width: 26px;
+  height: 26px;
+  border: 1.5px solid var(--gold);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  flex-shrink: 0;
+}
+.qr-poster-step-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  font-size: 7.5px;
+  line-height: 1.25;
+  color: #333;
+  text-align: center;
+}
+.qr-poster-step-copy i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #fff;
+  font-style: normal;
+  font-size: 7px;
+  font-weight: 800;
+}
+.qr-poster-step-copy b {
+  color: #161310;
+  font-weight: 800;
+}
+.qr-poster-foot {
+  width: calc(100% + 24px);
+  margin: 2px -12px 0;
+  padding: 16px 10px 14px;
+  background: #161310;
+  color: #fff;
+  border-radius: 40% 40% 0 0 / 18px 18px 0 0;
+  box-shadow: 0 -4px 0 var(--gold);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qr-poster-foot em {
+  font-style: italic;
+  font-size: 11px;
+  font-weight: 700;
+}
+.qr-poster-foot strong {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 800;
+}
+.qr-poster-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.qr-poster-actions .mini-btn {
+  background: #F6EFE4;
+  color: #161310;
+  border-color: #d9cfc2;
+}
+.qr-poster-actions .mini-btn:hover {
+  background: #fff8f0;
+  border-color: var(--gold);
+  color: #161310;
 }
 
 /* Blurred QR paywall (expired / no subscription) */
@@ -1225,6 +1406,12 @@ tr:last-child td { border-bottom: none; }
   padding: 22px 24px 50px;
   color: var(--text);
 }
+.sub-shell-embedded {
+  min-height: 0;
+  padding: 0 0 40px;
+  background: transparent;
+  color: var(--text);
+}
 .sub-topbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -2230,6 +2417,7 @@ tr:last-child td { border-bottom: none; }
   .kitchen-shell { padding: 14px; }
   .kitchen-topbar { flex-direction: column; align-items: stretch; gap: 10px; }
   .sub-shell { padding-top: 60px; }
+  .sub-shell-embedded { padding-top: 0; }
 }
 
 @media (max-width: 480px) {
@@ -2249,6 +2437,7 @@ tr:last-child td { border-bottom: none; }
   .pay-marks { gap: 4px; }
   .brand-chip { font-size: 9px !important; height: 20px !important; min-width: 56px !important; padding: 0 6px !important; }
   .sub-shell { padding: 14px !important; }
+  .sub-shell-embedded { padding: 0 0 32px !important; }
   .topbar-right > * { font-size: 11px; }
   .live-pill { display: none !important; }
   .cart-fab {

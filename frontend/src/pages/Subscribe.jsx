@@ -15,7 +15,7 @@ const fmtDate = (iso) => {
   try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
 };
 
-export default function Subscribe() {
+export default function Subscribe({ embedded = false, onGoDashboard, onApplied } = {}) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("calc");
   const [tables, setTables] = useState(14);
@@ -175,6 +175,12 @@ export default function Subscribe() {
     }
   };
 
+  const goDashboard = () => {
+    if (typeof onApplied === "function") onApplied();
+    if (typeof onGoDashboard === "function") onGoDashboard();
+    else navigate("/manager", { replace: true });
+  };
+
   const showPayResult = (payload) => setPayResult(payload);
 
   const onSubscribe = async () => {
@@ -185,12 +191,12 @@ export default function Subscribe() {
 
       if (planResp.applied === "next_cycle") {
         toast.success(`Change scheduled — ${tables} tables effective from ${fmtDate(planResp.next_cycle_start)}.`);
-        navigate("/manager");
+        goDashboard();
         return;
       }
       if (planResp.applied === "no_change") {
         toast.success("You're already on this plan");
-        navigate("/manager");
+        goDashboard();
         return;
       }
       if (planResp.applied === "trial") {
@@ -202,12 +208,12 @@ export default function Subscribe() {
         planResp.applied === "awaiting_payment" ||
         planResp.applied === "upgrade_proration";
       if (!needsPay && planResp.applied === "trial") {
-        navigate("/manager");
+        goDashboard();
         return;
       }
       if (!needsPay && planResp.applied === "immediate") {
         toast.success(`Plan updated to ${tables} tables.`);
-        navigate("/manager");
+        goDashboard();
         return;
       }
 
@@ -338,7 +344,8 @@ export default function Subscribe() {
   };
 
   return (
-    <div className="sub-shell" data-testid="subscribe-page">
+    <div className={embedded ? "section active sub-shell-embedded" : "sub-shell"} data-testid="subscribe-page">
+      {!embedded && (
       <div className="sub-topbar">
         {subLoaded && !isExpired ? (
           <button
@@ -363,7 +370,7 @@ export default function Subscribe() {
           </button>
         ) : subLoaded ? (
           <button
-            onClick={() => navigate("/manager")}
+            onClick={() => goDashboard()}
             className="sub-skip-btn"
             data-testid="subscribe-skip-btn"
           >
@@ -373,6 +380,7 @@ export default function Subscribe() {
           <div className="sub-topbar-side" aria-hidden="true" />
         )}
       </div>
+      )}
 
       <div className="sub-screen narrow" style={{ maxWidth: 680 }}>
         {/* Tabs */}
@@ -659,8 +667,8 @@ export default function Subscribe() {
                   opacity: 0,
                   pointerEvents: "none",
                   zIndex: -1,
-                  width: 180,
-                  height: 180 * tables,
+                  width: 300,
+                  height: 300 * tables,
                   overflow: "hidden",
                 }}
               >
@@ -668,10 +676,10 @@ export default function Subscribe() {
                   <div key={`hide-${n}`} data-qr-svg-sub={n}>
                     <QRCodeSVG
                       value={restaurantOrderUrl(localStorage.getItem("mgr_slug") || "", n)}
-                      size={160}
+                      size={280}
                       bgColor="#ffffff"
                       fgColor="#161310"
-                      level="M"
+                      level="H"
                     />
                   </div>
                 ))}
@@ -780,11 +788,13 @@ export default function Subscribe() {
         </div>
       </div>
 
+      {!embedded && (
       <LogoutDialog
         open={showLogout}
         onCancel={() => setShowLogout(false)}
         onConfirm={handleLogout}
       />
+      )}
 
       {payResult && (
         <div
@@ -796,7 +806,7 @@ export default function Subscribe() {
             if (e.target === e.currentTarget) {
               const go = payResult.goManager;
               setPayResult(null);
-              if (go) navigate("/manager");
+              if (go) goDashboard();
             }
           }}
         >
@@ -808,7 +818,7 @@ export default function Subscribe() {
               onClick={() => {
                 const go = payResult.goManager;
                 setPayResult(null);
-                if (go) navigate("/manager");
+                if (go) goDashboard();
               }}
             >
               <X size={18} />
@@ -827,10 +837,10 @@ export default function Subscribe() {
               onClick={() => {
                 const go = payResult.goManager;
                 setPayResult(null);
-                if (go) navigate("/manager");
+                if (go) goDashboard();
               }}
             >
-              {payResult.ok ? "Continue to Manager" : "OK"}
+              {payResult.ok ? (embedded ? "Continue" : "Continue to Manager") : "OK"}
             </button>
           </div>
         </div>

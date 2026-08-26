@@ -9,8 +9,7 @@ import Kitchen from "@/pages/Kitchen";
 import { initTheme } from "@/lib/theme";
 import "@/App.css";
 
-// Lazy-load payment/subscription bundle so Menu & Orders don't pay the cost (issue #20)
-const Subscribe = lazy(() => import("@/pages/Subscribe"));
+// Lazy-load admin so Menu & Orders don't pay the cost (issue #20)
 const Admin = lazy(() => import("@/pages/Admin"));
 const AdminLogin = lazy(() => import("@/pages/AdminLogin"));
 
@@ -83,9 +82,7 @@ function App() {
             path="/subscribe"
             element={
               <RequireAuth>
-                <Suspense fallback={<LazyFallback />}>
-                  <Subscribe />
-                </Suspense>
+                <Navigate to="/manager" replace state={{ tab: "subscribe" }} />
               </RequireAuth>
             }
           />

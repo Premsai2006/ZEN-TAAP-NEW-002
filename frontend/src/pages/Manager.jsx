@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight, Menu, X, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -12,11 +12,14 @@ import ProfileSection from "@/components/manager/ProfileSection";
 import SettingsSection from "@/components/manager/SettingsSection";
 import LogoutDialog from "@/components/manager/LogoutDialog";
 
+const Subscribe = lazy(() => import("@/pages/Subscribe"));
+
 const NAV = [
   { key: "orders", label: "Live Orders", icon: ClipboardList, needsSub: true },
   { key: "tables", label: "Tables", icon: Grid3x3, needsSub: true },
   { key: "menu", label: "Menu Management", icon: UtensilsCrossed, needsSub: true },
   { key: "sales", label: "Sales", icon: BarChart3, needsSub: true },
+  { key: "subscribe", label: "Subscription", icon: CreditCard, needsSub: false },
   { key: "profile", label: "Profile", icon: User, needsSub: false },
   { key: "settings", label: "Settings", icon: SettingsIcon, needsSub: false },
 ];
@@ -24,7 +27,9 @@ const NAV = [
 const LIVE_TABS = new Set(["orders", "tables"]);
 
 export default function Manager() {
-  const [active, setActive] = useState("orders");
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [active, setActive] = useState(() => location.state?.tab || "orders");
   const [showLogout, setShowLogout] = useState(false);
   const [showRevenue, setShowRevenue] = useState(() => {
     try { return localStorage.getItem("tt_show_revenue") === "1"; } catch { return false; }
@@ -42,7 +47,6 @@ export default function Manager() {
     try { return localStorage.getItem("mgr_slug") || ""; } catch { return ""; }
   });
   const [clock, setClock] = useState("");
-  const navigate = useNavigate();
 
   const setShowRevenuePersist = useCallback((v) => {
     const next = typeof v === "function" ? v(showRevenue) : v;
@@ -53,7 +57,7 @@ export default function Manager() {
   const refresh = useCallback(async () => {
     try {
       // On Settings/Profile, skip live orders/stats polling payload (issue #19)
-      if (active === "settings" || active === "profile") {
+      if (active === "settings" || active === "profile" || active === "subscribe") {
         const [st, sub, prof] = await Promise.all([
           api.get("/settings"),
           api.get("/subscription"),
@@ -153,13 +157,29 @@ export default function Manager() {
 
   const cashier = role === "cashier";
   const canSubscribe = role === "owner" || role === "manager";
-  const visibleNav = cashier ? NAV.filter((n) => n.key === "orders" || n.key === "tables") : NAV;
+  const visibleNav = cashier
+    ? NAV.filter((n) => n.key === "orders" || n.key === "tables")
+    : canSubscribe
+      ? NAV
+      : NAV.filter((n) => n.key !== "subscribe");
   const activeNav = visibleNav.find((n) => n.key === active) || visibleNav[0];
   const subStatus = subscription?.status;
   const locked = subscription && !["trial", "active"].includes(subStatus);
   const expired = subStatus === "expired";
   const createLocked = Boolean(locked);
   const statusLocked = Boolean(locked) && !expired;
+
+  useEffect(() => {
+    const tab = location.state?.tab;
+    if (!tab) return;
+    const allowed = cashier
+      ? ["orders", "tables"]
+      : canSubscribe
+        ? NAV.map((n) => n.key)
+        : NAV.filter((n) => n.key !== "subscribe").map((n) => n.key);
+    if (allowed.includes(tab)) setActive(tab);
+    navigate("/manager", { replace: true, state: {} });
+  }, [location.state, navigate, cashier, canSubscribe]);
 
   useEffect(() => {
     if (cashier && !["orders", "tables"].includes(active)) {
@@ -216,17 +236,6 @@ export default function Manager() {
               </div>
             );
           })}
-          {canSubscribe && (
-          <div
-            className="nav-link"
-            onClick={() => { navigate("/subscribe"); setMobileNav(false); }}
-            data-testid="nav-subscribe"
-            style={{ marginTop: 6, color: "var(--gold)" }}
-          >
-            <CreditCard size={16} className="icon" />
-            <span>Subscription</span>
-          </div>
-          )}
         </nav>
 
         <div
@@ -255,7 +264,7 @@ export default function Manager() {
           </div>
         </div>
 
-        {subscription && !["trial", "active"].includes(subscription.status) && (
+        {subscription && !["trial", "active"].includes(subscription.status) && active !== "subscribe" && (
           <div className="explore-banner" data-testid="explore-mode-banner">
             <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 220 }}>
               <Lock size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
@@ -289,7 +298,7 @@ export default function Manager() {
             <button
               type="button"
               className="explore-banner-cta"
-              onClick={() => navigate("/subscribe")}
+              onClick={() => { setActive("subscribe"); setMobileNav(false); }}
               data-testid="explore-subscribe-btn"
             >
               {subscription.status === "expired" ? "Pay & Resume" : "Start Free Trial"} <ArrowRight size={14} />
@@ -319,6 +328,7 @@ export default function Manager() {
             slug={restaurantSlug}
             restaurantName={settings?.restaurant_name}
             locked={locked}
+            onOpenSubscribe={() => setActive("subscribe")}
           />
         )}
         {active === "menu" && (
@@ -338,7 +348,21 @@ export default function Manager() {
             locked={locked}
           />
         )}
-        {active === "profile" && <ProfileSection onRefresh={refresh} />}
+        {active === "subscribe" && (
+          <Suspense fallback={<div style={{ padding: 24, color: "var(--muted)" }}>Loading subscription…</div>}>
+            <Subscribe
+              embedded
+              onApplied={refresh}
+              onGoDashboard={() => {
+                setActive("orders");
+                refresh();
+              }}
+            />
+          </Suspense>
+        )}
+        {active === "profile" && (
+          <ProfileSection onRefresh={refresh} onOpenSubscribe={() => setActive("subscribe")} />
+        )}
         {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} role={role} />}
       </div>
 

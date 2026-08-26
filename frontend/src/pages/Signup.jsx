@@ -128,7 +128,7 @@ export default function Signup() {
       if (data.slug) localStorage.setItem("mgr_slug", data.slug);
       if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       toast.success("Account created — next, choose your plan.");
-      navigate("/subscribe");
+      navigate("/manager", { state: { tab: "subscribe" } });
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't create your account. Please try again."));
     } finally {

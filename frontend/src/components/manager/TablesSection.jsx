@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { Download, QrCode, Link2, Lock } from "lucide-react";
+import { ZENTAAP_LOGO_SRC } from "@/lib/qrDownload";
 import { toast } from "sonner";
 import { restaurantOrderUrl } from "@/lib/qr";
 import {
@@ -17,6 +18,7 @@ export default function TablesSection({
   slug: slugProp,
   restaurantName,
   locked = false,
+  onOpenSubscribe,
 }) {
   const navigate = useNavigate();
   const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
@@ -60,7 +62,8 @@ export default function TablesSection({
         : "Start a trial or subscribe to download table QRs.",
       id: "qr-locked",
     });
-    navigate("/subscribe");
+    if (onOpenSubscribe) onOpenSubscribe();
+    else navigate("/manager", { state: { tab: "subscribe" } });
   };
 
   const downloadOneQR = async (n) => {
@@ -121,8 +124,8 @@ export default function TablesSection({
           opacity: 0,
           pointerEvents: "none",
           zIndex: -1,
-          width: 220,
-          height: 220 * tableCount,
+          width: 300,
+          height: 300 * tableCount,
           overflow: "hidden",
         }}
       >
@@ -130,10 +133,10 @@ export default function TablesSection({
           <div key={`hidden-qr-${n}`} data-qr-svg={n}>
             <QRCodeSVG
               value={restaurantOrderUrl(slug, n)}
-              size={200}
+              size={280}
               bgColor="#ffffff"
               fgColor="#161310"
-              level="M"
+              level="H"
             />
           </div>
         ))}
@@ -211,32 +214,63 @@ export default function TablesSection({
                 {tableNums.map((n) => {
                   const url = restaurantOrderUrl(slug, n);
                   return (
-                    <div key={n} className="table-qr-card" data-testid={`table-qr-${n}`}>
-                      <div style={{ background: "white", padding: 8, borderRadius: 8 }}>
+                    <div key={n} className="table-qr-card qr-poster-card" data-testid={`table-qr-${n}`}>
+                      <div className="qr-poster-accent" aria-hidden="true" />
+                      <div className="qr-poster-logo-wrap">
+                        <img src={ZENTAAP_LOGO_SRC} alt="ZenTaap" className="qr-poster-logo" />
+                      </div>
+                      <div className="qr-poster-cta">
+                        SCAN TO <span>ORDER NOW</span>
+                      </div>
+                      <div className="qr-poster-table">Table {n}</div>
+                      {restaurantName ? (
+                        <div className="qr-poster-rest">{restaurantName}</div>
+                      ) : null}
+                      <div className="qr-poster-qr">
                         <QRCodeSVG
                           value={url}
-                          size={120}
+                          size={132}
                           bgColor="#ffffff"
                           fgColor="#161310"
-                          level="M"
+                          level="H"
                         />
+                        <img src={ZENTAAP_LOGO_SRC} alt="" className="qr-poster-qr-badge" />
                       </div>
-                      <div style={{ marginTop: 8, fontWeight: 700 }}>Table {n}</div>
-                      <div
-                        data-testid={`table-qr-url-${n}`}
-                        title={url}
-                        style={{
-                          marginTop: 4,
-                          fontSize: 10,
-                          color: "var(--muted)",
-                          wordBreak: "break-all",
-                          lineHeight: 1.3,
-                          maxWidth: 160,
-                        }}
-                      >
-                        {slug ? `?table=${n}` : "no slug"}
+                      <div className="qr-poster-steps">
+                        <div className="qr-poster-step">
+                          <span className="qr-poster-step-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="7" y="3" width="10" height="18" rx="2" />
+                              <path d="M9 7h6M9 7v3M15 7v3M8 14h8" />
+                            </svg>
+                          </span>
+                          <span className="qr-poster-step-copy"><i>1</i><b>SCAN</b> the QR</span>
+                        </div>
+                        <div className="qr-poster-step">
+                          <span className="qr-poster-step-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="5" y="4" width="14" height="16" rx="2" />
+                              <path d="M8 9h8M8 13h8M8 17h5" />
+                            </svg>
+                          </span>
+                          <span className="qr-poster-step-copy"><i>2</i><b>CHOOSE</b> items</span>
+                        </div>
+                        <div className="qr-poster-step">
+                          <span className="qr-poster-step-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M6 14a6 6 0 0 1 12 0" />
+                              <path d="M4 14h16" />
+                              <circle cx="12" cy="7" r="1.2" fill="#161310" stroke="none" />
+                            </svg>
+                          </span>
+                          <span className="qr-poster-step-copy"><i>3</i><b>ENJOY</b> meal</span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                      <div className="qr-poster-foot">
+                        <em>Good Food</em>
+                        <strong>Great Experience!</strong>
+                      </div>
+                      <div className="qr-poster-actions">
                         <button
                           type="button"
                           onClick={() => downloadOneQR(n)}
@@ -279,7 +313,7 @@ export default function TablesSection({
                 <button
                   type="button"
                   className="qr-paywall-cta"
-                  onClick={() => navigate("/subscribe")}
+                  onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
                   data-testid="tables-qr-unlock-btn"
                 >
                   {isExpired ? "Pay & Resume" : "Unlock QRs"}
