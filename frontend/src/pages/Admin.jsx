@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
 
 const fmtINR = (n) =>
   `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -68,10 +69,7 @@ export default function Admin() {
   const [pricing, setPricing] = useState(null);
   const [form, setForm] = useState({
     per_table: 80,
-    base_fee: 0,
     gst_rate_pct: 18,
-    min_tables: 10,
-    max_tables: 60,
   });
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
@@ -80,8 +78,10 @@ export default function Admin() {
   const [pwSaving, setPwSaving] = useState(false);
   const [audit, setAudit] = useState([]);
   const [opsBusy, setOpsBusy] = useState(false);
-  const [overrideRs, setOverrideRs] = useState("");
+  // const [overrideRs, setOverrideRs] = useState(""); // billing override disabled
   const [shownPin, setShownPin] = useState("");
+  const [restPage, setRestPage] = useState(1);
+  const [auditPage, setAuditPage] = useState(1);
 
   const load = useCallback(async () => {
     try {
@@ -95,10 +95,7 @@ export default function Admin() {
       setPricing(price.data);
       setForm({
         per_table: price.data.per_table,
-        base_fee: price.data.base_fee,
         gst_rate_pct: price.data.gst_rate_pct,
-        min_tables: price.data.min_tables,
-        max_tables: price.data.max_tables,
       });
     } catch (err) {
       if (err?.response?.status === 401) return;
@@ -136,10 +133,7 @@ export default function Admin() {
     try {
       const { data } = await api.put("/admin/pricing", {
         per_table: Number(form.per_table),
-        base_fee: Number(form.base_fee),
         gst_rate_pct: Number(form.gst_rate_pct),
-        min_tables: Number(form.min_tables),
-        max_tables: Number(form.max_tables),
       });
       setPricing(data);
       toast.success("Pricing updated — new subscriptions use this rate.");
@@ -182,8 +176,9 @@ export default function Admin() {
     try {
       const { data } = await api.get(`/admin/restaurants/${row.id}`);
       setSelected({ ...row, ...data });
-      const paise = data.billing_override_paise;
-      setOverrideRs(paise != null ? String(paise / 100) : "");
+      // Billing override (demo ₹1–₹10) is disabled.
+      // const paise = data.billing_override_paise;
+      // setOverrideRs(paise != null ? String(paise / 100) : "");
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't load restaurant."));
     }
@@ -236,32 +231,33 @@ export default function Admin() {
     }
   };
 
-  const saveOverride = async () => {
-    if (!selected?.id) return;
-    const raw = overrideRs.trim();
-    let paise = null;
-    if (raw) {
-      const rupees = Number(raw);
-      if (!Number.isFinite(rupees) || rupees < 1 || rupees > 10) {
-        return toast.error("Override must be ₹1–₹10, or empty to clear.");
-      }
-      paise = Math.round(rupees * 100);
-    }
-    setOpsBusy(true);
-    try {
-      const { data } = await api.put(`/admin/restaurants/${selected.id}/billing-override`, {
-        billing_override_paise: paise,
-      });
-      setSelected((s) => ({ ...s, billing_override_paise: data.billing_override_paise }));
-      toast.success(paise == null ? "Billing override cleared." : `Checkout override set to ₹${(paise / 100).toFixed(0)}.`);
-      load();
-      loadAudit();
-    } catch (err) {
-      toast.error(friendlyError(err, "Couldn't save override."));
-    } finally {
-      setOpsBusy(false);
-    }
-  };
+  // Billing override (demo ₹1–₹10 checkout) — disabled. Not custom restaurant pricing.
+  // const saveOverride = async () => {
+  //   if (!selected?.id) return;
+  //   const raw = overrideRs.trim();
+  //   let paise = null;
+  //   if (raw) {
+  //     const rupees = Number(raw);
+  //     if (!Number.isFinite(rupees) || rupees < 1 || rupees > 10) {
+  //       return toast.error("Override must be ₹1–₹10, or empty to clear.");
+  //     }
+  //     paise = Math.round(rupees * 100);
+  //   }
+  //   setOpsBusy(true);
+  //   try {
+  //     const { data } = await api.put(`/admin/restaurants/${selected.id}/billing-override`, {
+  //       billing_override_paise: paise,
+  //     });
+  //     setSelected((s) => ({ ...s, billing_override_paise: data.billing_override_paise }));
+  //     toast.success(paise == null ? "Billing override cleared." : `Checkout override set to ₹${(paise / 100).toFixed(0)}.`);
+  //     load();
+  //     loadAudit();
+  //   } catch (err) {
+  //     toast.error(friendlyError(err, "Couldn't save override."));
+  //   } finally {
+  //     setOpsBusy(false);
+  //   }
+  // };
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -274,12 +270,15 @@ export default function Admin() {
     );
   }, [restaurants, q]);
 
+  useEffect(() => { setRestPage(1); }, [q]);
+  const pagedRestaurants = paginate(filtered, restPage);
+  const pagedAudit = paginate(audit, auditPage);
+
   const preview = useMemo(() => {
     const per = Number(form.per_table) || 0;
-    const base = Number(form.base_fee) || 0;
     const gst = (Number(form.gst_rate_pct) || 0) / 100;
-    const n = Number(form.min_tables) || 10;
-    const subtotal = base + per * n;
+    const n = 10;
+    const subtotal = per * n;
     const tax = subtotal * gst;
     return { n, subtotal, tax, total: subtotal + tax };
   }, [form]);
@@ -354,7 +353,7 @@ export default function Admin() {
               <div className="stat-label"><Building2 size={11} style={{ display: "inline", marginRight: 4 }} /> Per table</div>
               <div className="stat-value" data-testid="admin-per-table">{fmtINR(overview?.pricing?.per_table)}</div>
               <div className="stat-sub">
-                {overview?.pricing?.min_tables}–{overview?.pricing?.max_tables} tables · GST {overview?.pricing?.gst_rate_pct}%
+                GST {overview?.pricing?.gst_rate_pct}% · any table count
               </div>
             </div>
           </div>
@@ -451,7 +450,7 @@ export default function Admin() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((r) => (
+                  {pagedRestaurants.map((r) => (
                     <tr
                       key={r.id}
                       onClick={() => openRestaurant(r)}
@@ -473,6 +472,7 @@ export default function Admin() {
                 </tbody>
               </table>
             </div>
+            <PageBar page={restPage} total={filtered.length} pageSize={PAGE_SIZE} onPage={setRestPage} testId="admin-rest-page-bar" />
           </div>
           {selected && (
             <div className="add-item-card" style={{ marginTop: 14 }} data-testid="admin-restaurant-detail">
@@ -485,6 +485,7 @@ export default function Admin() {
                 <div>Payment method: <b style={{ color: "var(--text)" }}>{selected.payment_method || "—"}</b></div>
                 <div>Trial ends: <b style={{ color: "var(--text)" }}>{fmtDate(selected.trial_end)}</b></div>
                 <div>Access: <b style={{ color: selected.suspended ? "var(--red)" : "var(--text)" }}>{selected.suspended ? "Suspended" : "Open"}</b></div>
+                {/* Billing override (demo ₹1–₹10) disabled — not custom restaurant pricing.
                 <div>
                   Checkout override:{" "}
                   <b style={{ color: "var(--text)" }}>
@@ -493,6 +494,7 @@ export default function Admin() {
                       : "None"}
                   </b>
                 </div>
+                */}
               </div>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
@@ -532,6 +534,7 @@ export default function Admin() {
                   New PIN: {shownPin}
                 </div>
               )}
+              {/* Billing override (demo ₹1–₹10 checkout) — disabled.
               <label className="form-label">Billing override (₹1–₹10, empty to clear)</label>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
@@ -556,6 +559,7 @@ export default function Admin() {
                   Save override
                 </button>
               </div>
+              */}
             </div>
           )}
         </div>
@@ -565,8 +569,7 @@ export default function Admin() {
         <form className="add-item-card" onSubmit={savePricing} data-testid="admin-pricing-form" style={{ maxWidth: 640 }}>
           <div className="font-serif" style={{ fontSize: 22, marginBottom: 6 }}>Table pricing</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 18, lineHeight: 1.5 }}>
-            This rate is used by the subscribe page and new Razorpay checkouts.
-            Existing restaurants keep their current billed amount until they change plan or pay again.
+            Restaurants pay this rate per table, plus GST. They choose how many tables they have — there is no min/max plan here.
           </div>
 
           <label className="form-label">Price per table / month (₹, before GST)</label>
@@ -581,64 +584,24 @@ export default function Admin() {
             className="admin-input"
           />
 
-          <div className="form-row" style={{ marginTop: 14 }}>
-            <div>
-              <label className="form-label">Base fee (₹)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.base_fee}
-                onChange={(e) => setForm((f) => ({ ...f, base_fee: e.target.value }))}
-                data-testid="admin-base-fee-input"
-                className="admin-input"
-              />
-            </div>
-            <div>
-              <label className="form-label">GST (%)</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={form.gst_rate_pct}
-                onChange={(e) => setForm((f) => ({ ...f, gst_rate_pct: e.target.value }))}
-                data-testid="admin-gst-input"
-                className="admin-input"
-              />
-            </div>
-          </div>
-
-          <div className="form-row" style={{ marginTop: 14 }}>
-            <div>
-              <label className="form-label">Min tables</label>
-              <input
-                type="number"
-                min="1"
-                value={form.min_tables}
-                onChange={(e) => setForm((f) => ({ ...f, min_tables: e.target.value }))}
-                data-testid="admin-min-tables-input"
-                className="admin-input"
-              />
-            </div>
-            <div>
-              <label className="form-label">Max tables</label>
-              <input
-                type="number"
-                min="1"
-                value={form.max_tables}
-                onChange={(e) => setForm((f) => ({ ...f, max_tables: e.target.value }))}
-                data-testid="admin-max-tables-input"
-                className="admin-input"
-              />
-            </div>
+          <div style={{ marginTop: 14 }}>
+            <label className="form-label">GST (%)</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={form.gst_rate_pct}
+              onChange={(e) => setForm((f) => ({ ...f, gst_rate_pct: e.target.value }))}
+              data-testid="admin-gst-input"
+              className="admin-input"
+            />
           </div>
 
           <div className="formula-box" style={{ marginTop: 18 }} data-testid="admin-price-preview">
             <div className="formula-title">PREVIEW · {preview.n} TABLES</div>
             <div style={{ fontSize: 14, lineHeight: 1.7 }}>
-              {fmtINR(Number(form.per_table) || 0)} × {preview.n}
-              {Number(form.base_fee) > 0 ? ` + ${fmtINR(Number(form.base_fee) || 0)} base` : ""}
+              {fmtINR(Number(form.per_table) || 0)} × {preview.n} tables
               {" "}+ GST {form.gst_rate_pct}% ={" "}
               <b style={{ color: "var(--gold)" }}>{fmtINR(preview.total)}</b>
               /mo
@@ -719,11 +682,12 @@ export default function Admin() {
         <div className="add-item-card" data-testid="admin-audit">
           <div className="font-serif" style={{ fontSize: 22, marginBottom: 6 }}>Audit log</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>
-            Recent admin actions — suspend, PIN reset, billing override, pricing, password change.
+            Recent admin actions — suspend, PIN reset, pricing, password change.
           </div>
           {(audit || []).length === 0 ? (
             <div style={{ color: "var(--muted)", fontSize: 13 }}>No events yet.</div>
           ) : (
+            <>
             <div className="admin-table-wrap">
               <table className="admin-table">
                 <thead>
@@ -736,7 +700,7 @@ export default function Admin() {
                   </tr>
                 </thead>
                 <tbody>
-                  {audit.map((e) => (
+                  {pagedAudit.map((e) => (
                     <tr key={e.id || `${e.created_at}-${e.action}`}>
                       <td>{fmtDate(e.created_at)}</td>
                       <td>{e.actor || "—"}</td>
@@ -748,6 +712,8 @@ export default function Admin() {
                 </tbody>
               </table>
             </div>
+            <PageBar page={auditPage} total={(audit || []).length} pageSize={PAGE_SIZE} onPage={setAuditPage} testId="admin-audit-page-bar" />
+            </>
           )}
         </div>
       )}

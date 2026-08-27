@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import { UserPlus } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import CustomSelect from "@/components/ui/CustomSelect";
+import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
 
 const ROLES = [
   { value: "manager", label: "Manager" },
@@ -16,6 +18,7 @@ export default function StaffCard() {
   const [saving, setSaving] = useState(false);
   const [resetFor, setResetFor] = useState(null);
   const [resetPin, setResetPin] = useState("");
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async () => {
     try {
@@ -85,7 +88,7 @@ export default function StaffCard() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-        {staff.map((s) => (
+        {paginate(staff, page).map((s) => (
           <div
             key={s.id}
             data-testid={`staff-row-${s.id}`}
@@ -161,6 +164,7 @@ export default function StaffCard() {
         {staff.length === 0 && (
           <div style={{ color: "var(--muted)", fontSize: 13 }}>No staff yet — add a cashier or kitchen login below.</div>
         )}
+        <PageBar page={page} total={staff.length} pageSize={PAGE_SIZE} onPage={setPage} testId="staff-page-bar" />
       </div>
 
       <form onSubmit={add}>
@@ -176,23 +180,12 @@ export default function StaffCard() {
           </div>
           <div className="form-group">
             <label className="form-label">Role</label>
-            <select
+            <CustomSelect
               value={form.role}
-              onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
+              onChange={(role) => setForm((f) => ({ ...f, role }))}
+              options={ROLES}
               data-testid="staff-role"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                background: "var(--bg)",
-                border: "1px solid var(--line)",
-                color: "var(--text)",
-                borderRadius: 8,
-              }}
-            >
-              {ROLES.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
+            />
           </div>
         </div>
         <div className="form-group" style={{ marginTop: 10 }}>

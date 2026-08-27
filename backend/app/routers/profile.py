@@ -4,7 +4,7 @@ from app.deps import require_manager, assert_role
 from app.models import ProfileUpdate, KitchenPinUpdate
 from app.services import auth_service as auth
 from app.services import restaurants as rest_svc
-from app.services.pins import hash_pin, looks_hashed
+from app.services.pins import hash_pin
 
 router = APIRouter(tags=["profile"])
 
@@ -73,9 +73,8 @@ async def update_kitchen_pin(body: KitchenPinUpdate, sess=Depends(require_manage
 async def get_kitchen_pin(sess=Depends(require_manager)):
     doc = await rest_svc.require_restaurant_id(sess["restaurant_id"])
     stored = doc.get("kitchen_pin") or ""
-    # Never return bcrypt hashes to the client
     return {
         "kitchen_pin_set": bool(stored),
-        "kitchen_pin": "" if looks_hashed(stored) else stored,
+        "kitchen_pin": "",
         "customer_pin": "",
     }

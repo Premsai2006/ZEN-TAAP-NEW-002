@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import CustomSelect from "@/components/ui/CustomSelect";
 
 const MAX_IMAGES = 4;
 const initialForm = { name: "", price: "", cost_price: "", category: "", images: [] };
@@ -175,12 +176,16 @@ export default function MenuForm({ formState, categories, onRefresh }) {
             )}
           </label>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-            <select value={form.category} onChange={(e) => set("category", e.target.value)} data-testid="item-category-select" style={{ flex: 1 }}>
-              <option value="">— Uncategorized —</option>
-              {(categories || []).map((c) => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
+            <CustomSelect
+              value={form.category}
+              onChange={(category) => set("category", category)}
+              options={[
+                { value: "", label: "— Uncategorized —" },
+                ...(categories || []).map((c) => ({ value: c.name, label: c.name })),
+              ]}
+              data-testid="item-category-select"
+              style={{ flex: 1 }}
+            />
             {form.category && (
               <button type="button" className="mini-btn" onClick={renameSelectedCat} data-testid="edit-selected-cat-btn" title="Rename this category">
                 <Pencil size={12} /> Rename

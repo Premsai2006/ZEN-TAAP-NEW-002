@@ -36,7 +36,7 @@ def twofactor_configured() -> bool:
 
 
 def otp_delivery_configured() -> bool:
-    return twofactor_configured() or smtp_configured()
+    return twofactor_configured()
 
 
 def india_msisdn(phone_digits: str) -> str:
@@ -150,21 +150,14 @@ async def deliver_pin_reset_otp(
     restaurant_name: str = "",
 ) -> Tuple[bool, str, Optional[str]]:
     """
-    Prefer 2Factor SMS; fall back to email if SMS is not configured or fails.
+    SMS only (2Factor). No voice/call OTP and no email fallback.
     Returns (ok, channel, masked_destination).
     """
+    _ = email, restaurant_name
     if twofactor_configured():
         ok, _detail = await send_otp_sms(phone_digits, otp)
         if ok:
             return True, "sms", mask_phone(phone_digits)
-
-    if smtp_configured():
-        ok, _detail = await send_otp_email(email, otp, restaurant_name=restaurant_name)
-        if ok:
-            local, _, domain = (email or "").partition("@")
-            masked = f"{local[:1]}***@{domain}" if local and domain else "your email"
-            return True, "email", masked
-
     return False, "none", None
 
 

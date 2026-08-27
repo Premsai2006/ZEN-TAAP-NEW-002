@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Receipt, Eye, EyeOff, Wallet, Users, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import BillModal from "@/components/manager/BillModal";
+import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
 
 const STATUSES = ["all", "new", "cooking", "done", "delivered", "paid", "cancelled"];
 
@@ -82,8 +83,11 @@ export default function OrdersSection({
   const [wiCart, setWiCart] = useState({}); // id -> { item, qty }
   const [wiNotes, setWiNotes] = useState("");
   const [wiPlacing, setWiPlacing] = useState(false);
+  const [page, setPage] = useState(1);
 
   const filtered = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+  useEffect(() => { setPage(1); }, [filter]);
+  const paged = paginate(filtered, page);
 
   const updateOrder = async (id, status) => {
     if (noStatus) {
@@ -241,14 +245,14 @@ export default function OrdersSection({
               </tr>
             </thead>
             <tbody data-testid="orders-tbody">
-              {filtered.length === 0 && (
+              {paged.length === 0 && (
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 30 }}>
                     No orders.
                   </td>
                 </tr>
               )}
-              {filtered.map((o) => {
+              {paged.map((o) => {
                 const nxt = nextStatus(o.status);
                 const itemsLabel = (o.items || []).map((it) => `${it.name} ×${it.qty}`).join(", ");
                 const t = formatOrderTime(o.created_at);
@@ -319,6 +323,7 @@ export default function OrdersSection({
             </tbody>
           </table>
         </div>
+        <PageBar page={page} total={filtered.length} pageSize={PAGE_SIZE} onPage={setPage} testId="orders-page-bar" />
       </div>
 
       {billOrder && (

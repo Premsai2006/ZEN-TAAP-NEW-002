@@ -240,7 +240,7 @@ export default function ProfileSection({ onRefresh, onOpenSubscribe }) {
             <button
               type="button"
               className="mini-btn"
-              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
+              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager/subscribe"))}
               data-testid="profile-change-sub-btn"
               style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
             >
@@ -256,7 +256,7 @@ export default function ProfileSection({ onRefresh, onOpenSubscribe }) {
             <button
               type="button"
               className="mini-btn"
-              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
+              onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager/subscribe"))}
               data-testid="profile-start-sub-btn"
               style={{ background: "var(--gold)", color: "white", borderColor: "var(--gold)" }}
             >

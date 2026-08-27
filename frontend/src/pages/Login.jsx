@@ -11,7 +11,6 @@ export default function Login() {
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [lockedUntil, setLockedUntil] = useState(null);
   const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
 
@@ -22,11 +21,6 @@ export default function Login() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (lockedUntil && Date.now() < lockedUntil) {
-      const mins = Math.ceil((lockedUntil - Date.now()) / 60000);
-      toast.error(`Too many attempts. Please try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
-      return;
-    }
     if (contact.replace(/[^0-9]/g, "").length < 7) {
       toast.error("Please enter the phone number on your account.");
       return;
@@ -78,15 +72,14 @@ export default function Login() {
       } else {
         toast.success(data.staff_name ? `Welcome back, ${data.staff_name}` : "Welcome back");
       }
+      setPin("");
       if (data.landing === "kitchen") {
         navigate(data.slug ? `/kitchen/${data.slug}` : "/kitchen");
       } else {
-        navigate("/manager");
+        navigate("/manager/orders");
       }
     } catch (err) {
-      if (err?.response?.status === 429) {
-        setLockedUntil(Date.now() + 15 * 60 * 1000);
-      }
+      setPin("");
       toast.error(friendlyError(err, "Couldn't log you in. Please try again."));
     } finally {
       setLoading(false);
@@ -95,7 +88,7 @@ export default function Login() {
 
   return (
     <div className="login-shell" data-testid="login-page">
-      <form className="login-card" onSubmit={submit} data-testid="login-form">
+      <form className="login-card" onSubmit={submit} data-testid="login-form" autoComplete="off">
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div className="brand-logo-wrap" style={{ display: "inline-block" }}>
             <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 56 }} />
@@ -112,10 +105,13 @@ export default function Login() {
           <label className="form-label">Phone number</label>
           <input
             type="tel"
+            name="zentaap-phone"
             value={contact}
             onChange={(e) => setContact(e.target.value)}
             placeholder="Registered mobile number"
             autoFocus
+            autoComplete="tel"
+            inputMode="tel"
             data-testid="login-contact-input"
             style={{
               fontSize: 15,
@@ -135,13 +131,22 @@ export default function Login() {
           <div style={{ position: "relative" }}>
             <input
               type={showPin ? "text" : "password"}
+              name="zentaap-pin"
               inputMode="numeric"
               pattern="[0-9]*"
               value={pin}
               onChange={onPinChange}
-              placeholder="6+ digits recommended"
+              placeholder="Your staff PIN"
               maxLength={10}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               data-testid="login-pin-input"
+              className={showPin ? "" : "pin-masked"}
               style={{
                 fontSize: 20,
                 letterSpacing: 6,
@@ -217,12 +222,11 @@ export default function Login() {
           </a>
         </div>
 
-        <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
+        <div className="login-extra">
           <a
             href="/kitchen"
             className="role-card role-card-kitchen"
             data-testid="kitchen-view-link"
-            style={{ flex: 1 }}
           >
             <div className="role-card-icon">
               <ChefHat size={22} />

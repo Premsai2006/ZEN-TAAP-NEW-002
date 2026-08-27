@@ -82,12 +82,20 @@ function App() {
             path="/subscribe"
             element={
               <RequireAuth>
-                <Navigate to="/manager" replace state={{ tab: "subscribe" }} />
+                <Navigate to="/manager/subscribe" replace />
               </RequireAuth>
             }
           />
           <Route
             path="/manager"
+            element={
+              <RequireAuth>
+                <Navigate to="/manager/orders" replace />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/manager/:tab"
             element={
               <RequireAuth>
                 <Manager />

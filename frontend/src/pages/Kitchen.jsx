@@ -29,6 +29,7 @@ function KitchenPinGate({ slug, onUnlock }) {
       if (data.slug) localStorage.setItem("kitchen_slug", data.slug);
       onUnlock(data.slug || s);
     } catch (err) {
+      setPin("");
       toast.error(friendlyError(err, "That kitchen PIN is incorrect. Please try again."));
     } finally {
       setLoading(false);
@@ -96,6 +97,11 @@ function KitchenPinGate({ slug, onUnlock }) {
               onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
               autoFocus={!!slug}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
               data-testid="kitchen-pin-input"
               style={{ fontSize: 22, letterSpacing: 8, textAlign: "center", padding: "14px 44px 14px 12px", width: "100%", background: "var(--bg)", border: "1px solid var(--line)", color: "var(--text)", borderRadius: 8, outline: "none" }}
             />

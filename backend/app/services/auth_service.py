@@ -57,7 +57,7 @@ async def check_login_lockout(request: Request):
             mins = max(1, int((until - now).total_seconds() // 60) + 1)
             raise HTTPException(
                 status_code=429,
-                detail=f"Too many incorrect attempts. Try again in {mins} minute(s).",
+                detail="Please try again in a few minutes.",
             )
         await db.login_attempts.delete_one({"key": key})
 
@@ -72,15 +72,14 @@ async def record_login_failure(request: Request):
         update["locked_until"] = (now + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
         update["count"] = 0
     await db.login_attempts.update_one({"key": key}, {"$set": update}, upsert=True)
-    remaining = MAX_PIN_ATTEMPTS - count
     if count >= MAX_PIN_ATTEMPTS:
         raise HTTPException(
             status_code=429,
-            detail=f"Too many incorrect attempts. Locked for {LOCKOUT_MINUTES} minutes.",
+            detail="Please try again in a few minutes.",
         )
     raise HTTPException(
         status_code=401,
-        detail=f"Incorrect PIN. {remaining} attempt(s) remaining before lockout.",
+        detail="Incorrect PIN.",
     )
 
 

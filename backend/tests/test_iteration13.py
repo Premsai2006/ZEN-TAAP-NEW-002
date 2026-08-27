@@ -166,8 +166,8 @@ class TestKitchenPin:
         # The validator requires 4-6 digits, so we cannot set to "". We test 404
         # only if it's currently unset. Use GET to check.
         cur = http.get(f"{API}/settings/kitchen-pin", headers=auth_headers).json()
-        if cur.get("kitchen_pin"):
-            pytest.skip(f"Kitchen PIN already set ({cur['kitchen_pin']}); cannot test 404 path")
+        if cur.get("kitchen_pin_set"):
+            pytest.skip("Kitchen PIN already set; cannot test 404 path")
         r = http.post(f"{API}/auth/kitchen-login", json={"pin": "0000"})
         assert r.status_code == 404
         assert "not set" in r.json().get("detail", "").lower()
@@ -177,10 +177,11 @@ class TestKitchenPin:
         r = http.put(f"{API}/settings/kitchen-pin", headers=auth_headers, json={"new_pin": "5678"})
         assert r.status_code == 200
 
-        # Verify via GET
+        # Verify via GET — PIN itself is never returned
         g = http.get(f"{API}/settings/kitchen-pin", headers=auth_headers)
         assert g.status_code == 200
-        assert g.json()["kitchen_pin"] == "5678"
+        assert g.json()["kitchen_pin_set"] is True
+        assert not g.json().get("kitchen_pin")
 
         # Login with correct PIN
         ok = http.post(f"{API}/auth/kitchen-login", json={"pin": "5678"})

@@ -41,12 +41,13 @@ DEFAULT_PIN = "123456"
 ADMIN_USERNAME = (os.environ.get("ADMIN_USERNAME") or "").strip()
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 
-# Pricing
+# Pricing — per table only. Base fee is unused (always 0).
+# Table count is not limited in Admin; 1–500 is a safety cap for checkout/QRs.
 BASE_FEE = 0
 PER_TABLE = 80.0
 GST_RATE = 0.18
-MIN_TABLES = 10
-MAX_TABLES = 60
+MIN_TABLES = 1
+MAX_TABLES = 500
 TRIAL_DAYS = 4
 
 # Auth lockout

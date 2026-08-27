@@ -1,14 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import MenuForm, { useMenuForm } from "./menu/MenuForm";
 import MenuItemCard from "./menu/MenuItemCard";
 import MenuSearchBar from "./menu/MenuSearchBar";
+import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
 
 export default function MenuSection({ menu, categories, onRefresh, locked }) {
   const formState = useMenuForm();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const removeItem = async (id) => {
     if (locked) return toast.error("Subscribe to ZenTaap to manage the menu.");
@@ -45,6 +47,9 @@ export default function MenuSection({ menu, categories, onRefresh, locked }) {
     );
   }, [menu, search]);
 
+  useEffect(() => { setPage(1); }, [search]);
+  const pagedMenu = paginate(filteredMenu, page);
+
   return (
     <div className="section active" data-testid="menu-section">
       <MenuForm formState={formState} categories={categories} onRefresh={onRefresh} />
@@ -52,7 +57,7 @@ export default function MenuSection({ menu, categories, onRefresh, locked }) {
       <MenuSearchBar value={search} onChange={setSearch} total={menu.length} shown={filteredMenu.length} />
 
       <div className="menu-mgmt-grid" data-testid="menu-grid">
-        {filteredMenu.map((it) => (
+        {pagedMenu.map((it) => (
           <MenuItemCard
             key={it.id}
             item={it}
@@ -67,6 +72,7 @@ export default function MenuSection({ menu, categories, onRefresh, locked }) {
           </div>
         )}
       </div>
+      <PageBar page={page} total={filteredMenu.length} pageSize={PAGE_SIZE} onPage={setPage} testId="menu-page-bar" />
     </div>
   );
 }

@@ -16,7 +16,7 @@ from app.services import restaurants as rest_svc
 from app.services import staff as staff_svc
 from app.services.pins import hash_pin, verify_pin, needs_rehash
 from app.deps import require_manager, extract_manager_token, set_manager_cookie, clear_manager_cookie, assert_role
-from app.services.sms import deliver_pin_reset_otp, otp_delivery_configured, smtp_configured, twofactor_configured
+from app.services.sms import deliver_pin_reset_otp, otp_delivery_configured, twofactor_configured
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -67,7 +67,7 @@ async def signup_request_otp(body: SignupOtpBody):
     )
     resp = {
         "success": True,
-        "message": f"Code sent to {masked or 'your phone or email'}" if sent_ok else "Code generated.",
+        "message": f"Code sent to {masked or 'your phone'}" if sent_ok else "Code generated.",
         "channel": channel if sent_ok else "none",
     }
     if DEMO_MODE:
@@ -78,7 +78,7 @@ async def signup_request_otp(body: SignupOtpBody):
     if not otp_delivery_configured():
         raise HTTPException(
             status_code=503,
-            detail="OTP is not configured. Set TWOFACTOR_API_KEY or SMTP on the server.",
+            detail="OTP SMS is not configured. Set TWOFACTOR_API_KEY on the server.",
         )
     if not sent_ok:
         raise HTTPException(status_code=502, detail="Could not send the OTP. Please try again.")
@@ -277,10 +277,10 @@ async def request_otp(body: RequestOtpBody):
         raise HTTPException(status_code=401, detail="That phone number does not match our records.")
 
     to_email = (restaurant.get("email") or "").strip()
-    if not twofactor_configured() and smtp_configured() and (not to_email or "@" not in to_email):
+    if not twofactor_configured() and not DEMO_MODE:
         raise HTTPException(
-            status_code=400,
-            detail="No email is saved on this account. Add an email in Profile, then try Forgot PIN again.",
+            status_code=503,
+            detail="OTP SMS is not configured. Set TWOFACTOR_API_KEY on the server.",
         )
 
     otp = f"{secrets.randbelow(1_000_000):06d}"
@@ -309,12 +309,7 @@ async def request_otp(body: RequestOtpBody):
         upsert=True,
     )
 
-    if channel == "sms":
-        dest_msg = f"Code sent to {masked or 'your phone'}"
-    elif channel == "email":
-        dest_msg = f"Code sent to {masked or 'your email'}"
-    else:
-        dest_msg = "Code generated."
+    dest_msg = f"Code sent to {masked or 'your phone'}" if channel == "sms" else "Code generated."
 
     resp = {
         "success": True,
@@ -361,8 +356,15 @@ async def verify_otp(body: VerifyOtpBody):
         raise HTTPException(status_code=401, detail="That phone number does not match our records.")
     if rec.get("otp") != body.otp.strip():
         raise HTTPException(status_code=401, detail="Incorrect OTP. Please try again.")
-    auth.validate_pin(body.new_pin, new=True)
-    await rest_svc.update_restaurant(restaurant["id"], {"pin": hash_pin(body.new_pin)})
+    pin = (body.new_pin or "").strip()
+    if not pin:
+        await db.otps.update_one(
+            {"key": f"pin_reset:{restaurant['id']}"},
+            {"$set": {"verified": True}},
+        )
+        return {"success": True, "verified": True}
+    auth.validate_pin(pin, new=True)
+    await rest_svc.update_restaurant(restaurant["id"], {"pin": hash_pin(pin)})
     await db.otps.delete_one({"key": f"pin_reset:{restaurant['id']}"})
     return {"success": True}
 

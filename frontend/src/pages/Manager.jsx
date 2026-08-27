@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { ClipboardList, Grid3x3, UtensilsCrossed, BarChart3, LogOut, Settings as SettingsIcon, User, Lock, ArrowRight, Menu, X, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -28,8 +28,7 @@ const LIVE_TABS = new Set(["orders", "tables"]);
 
 export default function Manager() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const [active, setActive] = useState(() => location.state?.tab || "orders");
+  const { tab } = useParams();
   const [showLogout, setShowLogout] = useState(false);
   const [showRevenue, setShowRevenue] = useState(() => {
     try { return localStorage.getItem("tt_show_revenue") === "1"; } catch { return false; }
@@ -47,6 +46,23 @@ export default function Manager() {
     try { return localStorage.getItem("mgr_slug") || ""; } catch { return ""; }
   });
   const [clock, setClock] = useState("");
+  const [mobileNav, setMobileNav] = useState(false);
+
+  const cashier = role === "cashier";
+  const canSubscribe = role === "owner" || role === "manager";
+  const visibleNav = cashier
+    ? NAV.filter((n) => n.key === "orders" || n.key === "tables")
+    : canSubscribe
+      ? NAV
+      : NAV.filter((n) => n.key !== "subscribe");
+  const allowed = visibleNav.map((n) => n.key);
+  const active = allowed.includes(tab) ? tab : (allowed[0] || "orders");
+
+  const setActive = (key) => {
+    const next = allowed.includes(key) ? key : (allowed[0] || "orders");
+    navigate(`/manager/${next}`);
+    setMobileNav(false);
+  };
 
   const setShowRevenuePersist = useCallback((v) => {
     const next = typeof v === "function" ? v(showRevenue) : v;
@@ -155,13 +171,12 @@ export default function Manager() {
     navigate("/login");
   };
 
-  const cashier = role === "cashier";
-  const canSubscribe = role === "owner" || role === "manager";
-  const visibleNav = cashier
-    ? NAV.filter((n) => n.key === "orders" || n.key === "tables")
-    : canSubscribe
-      ? NAV
-      : NAV.filter((n) => n.key !== "subscribe");
+  useEffect(() => {
+    if (!tab || !allowed.includes(tab)) {
+      navigate(`/manager/${allowed[0] || "orders"}`, { replace: true });
+    }
+  }, [tab, cashier, canSubscribe, navigate]);
+
   const activeNav = visibleNav.find((n) => n.key === active) || visibleNav[0];
   const subStatus = subscription?.status;
   const locked = subscription && !["trial", "active"].includes(subStatus);
@@ -169,41 +184,30 @@ export default function Manager() {
   const createLocked = Boolean(locked);
   const statusLocked = Boolean(locked) && !expired;
 
-  useEffect(() => {
-    const tab = location.state?.tab;
-    if (!tab) return;
-    const allowed = cashier
-      ? ["orders", "tables"]
-      : canSubscribe
-        ? NAV.map((n) => n.key)
-        : NAV.filter((n) => n.key !== "subscribe").map((n) => n.key);
-    if (allowed.includes(tab)) setActive(tab);
-    navigate("/manager", { replace: true, state: {} });
-  }, [location.state, navigate, cashier, canSubscribe]);
-
-  useEffect(() => {
-    if (cashier && !["orders", "tables"].includes(active)) {
-      setActive("orders");
-    }
-  }, [cashier, active]);
-
-  const [mobileNav, setMobileNav] = useState(false);
-
   return (
     <div className={`layout ${mobileNav ? "mobile-nav-open" : ""}`} data-testid="manager-dashboard">
       <button
         type="button"
         className="mobile-nav-toggle"
-        onClick={() => setMobileNav((v) => !v)}
-        aria-label="Toggle navigation"
+        onClick={() => setMobileNav(true)}
+        aria-label="Open navigation"
         data-testid="mobile-nav-toggle"
       >
-        {mobileNav ? <X size={18} /> : <Menu size={18} />}
+        <Menu size={18} />
       </button>
       {mobileNav && <div className="mobile-nav-backdrop" onClick={() => setMobileNav(false)} />}
 
       <aside className="sidebar" data-testid="sidebar">
-        <div style={{ marginBottom: 22, padding: "4px 8px" }}>
+        <div className="sidebar-brand">
+          <button
+            type="button"
+            className="sidebar-close"
+            onClick={() => setMobileNav(false)}
+            aria-label="Close navigation"
+            data-testid="sidebar-close-btn"
+          >
+            <X size={18} />
+          </button>
           <div className="brand-logo-wrap">
             <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 30 }} />
           </div>
@@ -301,7 +305,7 @@ export default function Manager() {
             <button
               type="button"
               className="explore-banner-cta"
-              onClick={() => { setActive("subscribe"); setMobileNav(false); }}
+              onClick={() => { setActive("subscribe"); }}
               data-testid="explore-subscribe-btn"
             >
               {subscription.status === "expired" ? "Pay & Resume" : "Subscribe"} <ArrowRight size={14} />
@@ -356,6 +360,7 @@ export default function Manager() {
             <Subscribe
               embedded
               onApplied={refresh}
+              onGoTab={(key) => setActive(key)}
               onGoDashboard={() => {
                 setActive("orders");
                 refresh();

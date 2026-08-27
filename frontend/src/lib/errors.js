@@ -29,7 +29,7 @@ const RULES = [
   [/pin must be numeric|digits only/i, "Your PIN can only contain numbers."],
   [/pin must be \d/i, "Please choose a PIN with the required number of digits."],
   // Keep lockout / remaining-attempt wording (already clear for users)
-  [/too many|locked for|attempt\(s\) remaining/i, null],
+  [/too many|locked for|attempt\(s\) remaining|please try again in a few minutes/i, "That PIN is incorrect. Please try again."],
   [/incorrect kitchen pin/i, "That kitchen PIN is incorrect. Please try again."],
   [/kitchen pin not set/i, "Kitchen PIN isn't set up yet. Ask your manager to add one."],
   [/current pin is incorrect|incorrect pin/i, "That PIN is incorrect. Please try again."],
@@ -46,7 +46,7 @@ const RULES = [
   [/no fields to update/i, "Nothing to save — make a change first."],
   [/image too large/i, "That image is too large. Please use one under 1.8 MB."],
   [/invalid image/i, "That file isn't a valid image. Please try another."],
-  [/tables must be between/i, "Please choose a table count within the allowed range."],
+  [/tables must be between|please choose between/i, "Please enter how many tables you have."],
   [/no restaurant found with that url|restaurant not found/i, "No restaurant found with that URL. Check Manager → Profile for the exact name (e.g. bt-s)."],
   [/not found/i, "We couldn't find that item. It may have been removed."],
   [/razorpay|sdk failed/i, "Payment couldn't start. Please refresh and try again."],
@@ -82,8 +82,7 @@ export function friendlyError(err, fallback = "Something went wrong. Please try 
   }
   const status = err.response.status;
   if (status === 429) {
-    const mapped = mapDetail(extractDetail(err));
-    return mapped || "Too many attempts. Please wait a moment and try again.";
+    return "That PIN is incorrect. Please try again.";
   }
   const mapped = mapDetail(extractDetail(err));
   if (mapped) return mapped;

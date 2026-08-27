@@ -11,6 +11,7 @@ import {
   qrFileName,
   triggerBlobDownload,
 } from "@/lib/qrDownload";
+import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
 
 export default function TablesSection({
   orders,
@@ -41,6 +42,7 @@ export default function TablesSection({
 
   const [showQRs, setShowQRs] = useState(false);
   const [zipping, setZipping] = useState(false);
+  const [page, setPage] = useState(1);
   const qrPrintRef = useRef(null);
 
   // When locked/expired, open the gallery so the paywall is visible.
@@ -63,7 +65,7 @@ export default function TablesSection({
       id: "qr-locked",
     });
     if (onOpenSubscribe) onOpenSubscribe();
-    else navigate("/manager", { state: { tab: "subscribe" } });
+    else navigate("/manager/subscribe");
   };
 
   const downloadOneQR = async (n) => {
@@ -211,7 +213,7 @@ export default function TablesSection({
           <div className={`qr-locked-wrap${qrLocked ? " is-locked" : ""}`} data-testid="tables-qr-locked-wrap">
             <div className={qrLocked ? "qr-locked-blur" : undefined}>
               <div className="tables-qr-grid">
-                {tableNums.map((n) => {
+                {paginate(tableNums, page).map((n) => {
                   const url = restaurantOrderUrl(slug, n);
                   return (
                     <div key={n} className="table-qr-card qr-poster-card" data-testid={`table-qr-${n}`}>
@@ -313,7 +315,7 @@ export default function TablesSection({
                 <button
                   type="button"
                   className="qr-paywall-cta"
-                  onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager", { state: { tab: "subscribe" } }))}
+                  onClick={() => (onOpenSubscribe ? onOpenSubscribe() : navigate("/manager/subscribe"))}
                   data-testid="tables-qr-unlock-btn"
                 >
                   {isExpired ? "Pay & Resume" : "Unlock QRs"}
@@ -321,6 +323,7 @@ export default function TablesSection({
               </div>
             )}
           </div>
+          <PageBar page={page} total={tableNums.length} pageSize={PAGE_SIZE} onPage={setPage} testId="tables-page-bar" />
         </div>
       )}
     </div>

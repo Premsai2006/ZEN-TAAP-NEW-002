@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ImageIcon, Save } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import CustomSelect from "@/components/ui/CustomSelect";
 
 const fileToDataUrl = (file) =>
   new Promise((resolve, reject) => {
@@ -125,11 +126,16 @@ export default function BillBrandingForm({ settings, onRefresh }) {
       <div className="font-serif" style={{ fontSize: 18, margin: "22px 0 14px" }}>Printer Setup</div>
       <div className="form-group" style={{ marginBottom: 14 }}>
         <label className="form-label">Printer / Paper width</label>
-        <select value={form.printer_type} onChange={(e) => set("printer_type", e.target.value)} data-testid="settings-printer-select">
-          <option value="browser">Browser default (A4 / Letter)</option>
-          <option value="thermal-58mm">Thermal 58mm</option>
-          <option value="thermal-80mm">Thermal 80mm (recommended)</option>
-        </select>
+        <CustomSelect
+          value={form.printer_type}
+          onChange={(printer_type) => set("printer_type", printer_type)}
+          options={[
+            { value: "browser", label: "Browser default (A4 / Letter)" },
+            { value: "thermal-58mm", label: "Thermal 58mm" },
+            { value: "thermal-80mm", label: "Thermal 80mm (recommended)" },
+          ]}
+          data-testid="settings-printer-select"
+        />
       </div>
 
       <button type="submit" className="submit-btn" disabled={saving} data-testid="settings-save-btn">

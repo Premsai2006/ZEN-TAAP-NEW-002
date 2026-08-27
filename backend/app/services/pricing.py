@@ -47,14 +47,14 @@ def apply_pricing_cache(doc: dict) -> dict:
 
 def compute_price(tables: int) -> dict:
     cfg = _cache
-    lo, hi = cfg["min_tables"], cfg["max_tables"]
+    lo, hi = 1, 500
     if tables < lo or tables > hi:
         raise HTTPException(
             status_code=400,
             detail=f"Please choose between {lo} and {hi} tables.",
         )
     per = cfg["per_table"]
-    base = cfg["base_fee"]
+    base = 0  # per-table only; platform base fee is not used
     gst_rate = cfg["gst_rate"]
     subtotal = round(base + per * tables, 2)
     gst = round(subtotal * gst_rate, 2)
@@ -79,20 +79,21 @@ def compute_price(tables: int) -> dict:
 
 
 def restaurant_billing_override_paise(restaurant: Optional[dict]) -> Optional[int]:
-    """Per-restaurant micro-mandate amount (paise). Only set on demo accounts."""
-    if not restaurant:
-        return None
-    raw = restaurant.get("billing_override_paise")
-    if raw is None:
-        return None
-    try:
-        paise = int(raw)
-    except Exception:
-        return None
-    # Allow ₹1–₹10 only for safety
-    if paise < 100 or paise > 1000:
-        return None
-    return paise
+    """Per-restaurant micro-mandate amount (paise). Disabled — not custom restaurant pricing."""
+    return None
+    # if not restaurant:
+    #     return None
+    # raw = restaurant.get("billing_override_paise")
+    # if raw is None:
+    #     return None
+    # try:
+    #     paise = int(raw)
+    # except Exception:
+    #     return None
+    # # Allow ₹1–₹10 only for safety
+    # if paise < 100 or paise > 1000:
+    #     return None
+    # return paise
 
 
 def compute_price_for_restaurant(tables: int, restaurant: Optional[dict] = None) -> dict:
@@ -130,7 +131,7 @@ def compute_upgrade_proration(
     Keeps next_cycle_start unchanged after payment.
     """
     cfg = _cache
-    lo, hi = cfg["min_tables"], cfg["max_tables"]
+    lo, hi = 1, 500
     gst_rate = cfg["gst_rate"]
     if new_tables <= current_tables:
         raise HTTPException(status_code=400, detail="New table count must be higher than your current plan.")

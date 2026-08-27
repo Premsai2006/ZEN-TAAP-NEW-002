@@ -3,6 +3,7 @@ import { Printer, X, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
+import CustomSelect from "@/components/ui/CustomSelect";
 
 export default function BillModal({ order, settings, onClose, onSettled }) {
   const [waPhone, setWaPhone] = useState("");
@@ -301,24 +302,18 @@ export default function BillModal({ order, settings, onClose, onSettled }) {
         <div className="no-print" style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
           {order.status !== "paid" && order.status !== "cancelled" && (
             <div style={{ width: "100%", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <select
+              <CustomSelect
                 value={payMode}
-                onChange={(e) => setPayMode(e.target.value)}
+                onChange={setPayMode}
+                options={[
+                  { value: "cash", label: "Cash" },
+                  { value: "upi", label: "UPI" },
+                  { value: "card", label: "Card" },
+                  { value: "other", label: "Other" },
+                ]}
                 data-testid="bill-pay-mode"
-                style={{
-                  flex: "1 1 120px",
-                  background: "var(--bg)",
-                  border: "1px solid var(--line)",
-                  color: "var(--text)",
-                  borderRadius: 8,
-                  padding: "10px 12px",
-                }}
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="card">Card</option>
-                <option value="other">Other</option>
-              </select>
+                style={{ flex: "1 1 160px" }}
+              />
               <button
                 type="button"
                 className="submit-btn"

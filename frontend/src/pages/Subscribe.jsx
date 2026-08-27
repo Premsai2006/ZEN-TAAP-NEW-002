@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowLeft, Gift, ShieldCheck, Calculator, FileText, RefreshCw, QrCode, Repeat, Download, LogOut, X, CheckCircle2, XCircle, Lock } from "lucide-react";
+import { ArrowLeft, Gift, ShieldCheck, Calculator, FileText, RefreshCw, QrCode, Repeat, Download, LogOut, X, CheckCircle2, XCircle, Lock, User, UtensilsCrossed, Users, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
@@ -15,7 +15,31 @@ const fmtDate = (iso) => {
   try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); } catch { return "—"; }
 };
 
-export default function Subscribe({ embedded = false, onGoDashboard, onApplied } = {}) {
+const SETUP_STEPS = [
+  {
+    key: "profile",
+    title: "Restaurant profile",
+    body: "Set your name, address, GSTIN, and the ordering URL guests will scan.",
+  },
+  {
+    key: "menu",
+    title: "Add the menu",
+    body: "Create categories and dishes with prices so tables can place orders.",
+  },
+  {
+    key: "tables",
+    title: "Print table QRs",
+    body: "Download one QR per table and place it on each table.",
+  },
+  {
+    key: "settings",
+    title: "Staff & kitchen PIN",
+    body: "Give cashiers, managers, and kitchen staff their own PINs.",
+  },
+];
+const SETUP_ICONS = { profile: User, menu: UtensilsCrossed, tables: QrCode, settings: Users };
+
+export default function Subscribe({ embedded = false, onGoDashboard, onApplied, onGoTab } = {}) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("calc");
   const [tables, setTables] = useState(14);
@@ -27,6 +51,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
   const [zippingQrs, setZippingQrs] = useState(false);
   const [upgradeQuote, setUpgradeQuote] = useState(null);
   const [payResult, setPayResult] = useState(null); // { ok, title, message, detail }
+  const [addingTables, setAddingTables] = useState(false);
 
   useEffect(() => {
     api
@@ -75,16 +100,8 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
   );
   const isExpired = existing?.status === "expired";
   const isChangeRequest = hasActive && tables !== existing.tables;
-  const minT = pricing?.min_tables ?? 10;
-  const maxT = pricing?.max_tables ?? 60;
-  const sliderMarks = useMemo(() => {
-    if (maxT <= minT) return [minT];
-    const marks = [];
-    for (let i = 0; i <= 5; i += 1) {
-      marks.push(Math.round(minT + ((maxT - minT) * i) / 5));
-    }
-    return [...new Set(marks)];
-  }, [minT, maxT]);
+  const minT = 1;
+  const maxT = pricing?.max_tables ?? 500;
   const isUpgradeIntent =
     existing?.status === "active" && tables > (existing?.tables || 0);
   const isUpgradeNow = isUpgradeIntent && upgradeQuote?.applicable && upgradeQuote?.proration;
@@ -93,10 +110,10 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
 
   useEffect(() => {
     if (!pricing) return;
-    const lo = pricing.min_tables ?? 10;
-    const hi = pricing.max_tables ?? 60;
+    const lo = 1;
+    const hi = pricing.max_tables ?? 500;
     setTables((t) => Math.min(hi, Math.max(lo, t)));
-  }, [pricing?.min_tables, pricing?.max_tables]);
+  }, [pricing?.max_tables]);
 
   const effectiveFrom = useMemo(() => {
     const raw = existing?.effective_from || existing?.next_cycle_start;
@@ -181,7 +198,14 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
   const goDashboard = () => {
     if (typeof onApplied === "function") onApplied();
     if (typeof onGoDashboard === "function") onGoDashboard();
-    else navigate("/manager", { replace: true });
+    else navigate("/manager/orders", { replace: true });
+  };
+
+  const goSetup = (key) => {
+    setPayResult(null);
+    if (typeof onApplied === "function") onApplied();
+    if (typeof onGoTab === "function") onGoTab(key);
+    else navigate(`/manager/${key}`, { replace: true });
   };
 
   const showPayResult = (payload) => setPayResult(payload);
@@ -381,7 +405,15 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
       )}
 
       <div className="sub-screen narrow" style={{ maxWidth: 680 }}>
-        {/* Tabs */}
+        {/* Billing override chip disabled — demo ₹1–₹10 checkout, not custom pricing.
+        {pricing?.billing_override && (
+          <div className="billing-override-chip" data-testid="billing-override-chip">
+            Demo billing override — checkout is ₹{(pricing.billing_override_paise / 100).toFixed(0)} instead of standard pricing.
+          </div>
+        )}
+        */}
+
+        {(!hasActive || addingTables) && (
         <div className="pricing-tabs" data-testid="pricing-tabs">
           <button
             className={`pricing-tab ${tab === "calc" ? "active" : ""}`}
@@ -398,6 +430,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
             <FileText size={14} /> Breakdown
           </button>
         </div>
+        )}
 
         {/* Intro bonus — first successful payment only */}
         {introEligible && !hasActive && (
@@ -447,72 +480,109 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
           </div>
         )}
 
-        {/* Active subscription banner */}
+        {/* Active plan details */}
         {hasActive && (
-          <div
-            data-testid="sub-change-notice"
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "flex-start",
-              background: "rgba(232,125,47,0.08)",
-              border: "1px solid rgba(232,125,47,0.3)",
-              padding: "12px 16px",
-              borderRadius: 12,
-              marginBottom: 22,
-              color: "var(--text)",
-            }}
-          >
-            <RefreshCw size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
-            <div style={{ fontSize: 13, lineHeight: 1.55, flex: 1 }}>
-              You currently have <b>{existing.tables} tables</b> ({fmtRupee(existing.total)}/mo).{" "}
-              {isProratedUpgrade ? (
-                <>
-                  Adding tables now? Pay only for the <b>extra tables</b> for the days left in this cycle.
-                  From <b>{fmtDate(prorate?.next_cycle_start || existing.next_cycle_start)}</b> you&apos;ll
-                  be billed the full <b>{tables}-table</b> plan.
-                </>
-              ) : isChangeRequest && tables < existing.tables ? (
-                <>
-                  Reducing to <b>{tables} tables</b> takes effect from <b>{fmtEffective}</b> (next cycle).
-                  Your current cycle continues unchanged until then.
-                </>
-              ) : isChangeRequest ? (
-                <>
-                  Updating to <b>{tables} tables</b> will be billed from <b>{fmtEffective}</b>
-                  {effectiveFrom && effectiveFrom.getTime() <= Date.now() + 60_000 ? " (effective immediately)" : " (next cycle)"}.
-                </>
-              ) : (
-                <>Adjust the slider to change your plan. Upgrades unlock after a small prorated payment for days left.</>
-              )}
-              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }} data-testid="sub-cycle-dates">
-                <div className="cycle-pill cycle-pill-start">
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
-                  <div>
-                    <div className="cycle-pill-label">Started</div>
-                    <div className="cycle-pill-value">{fmtDate(existing.cycle_start || existing.trial_start)}</div>
-                  </div>
-                </div>
-                <div className="cycle-pill cycle-pill-end">
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--gold)" }} />
-                  <div>
-                    <div className="cycle-pill-label">{existing.status === "trial" ? "Trial ends" : "Ends on"}</div>
-                    <div className="cycle-pill-value">
-                      {existing.status === "trial" ? fmtDate(existing.trial_end) : fmtDate(existing.cycle_end || existing.next_cycle_start)}
-                    </div>
-                  </div>
-                </div>
+          <div className="plan-details-card" data-testid="sub-change-notice">
+            <div className="plan-details-head">
+              <div>
+                <div className="plan-details-kicker">Your subscription</div>
+                <div className="plan-details-title">{existing.tables} tables · {fmtRupee(existing.total)}/mo</div>
               </div>
-              {existing.pending_tables && existing.pending_tables !== existing.tables && (
-                <div style={{ marginTop: 6, color: "var(--gold)" }}>
-                  Pending change: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo).
-                </div>
+              <span className={`plan-status-pill ${existing.status}`}>{existing.status === "trial" ? "Trial" : "Active"}</span>
+            </div>
+            <div className="plan-details-grid">
+              <div>
+                <div className="plan-details-label">Tables</div>
+                <div className="plan-details-value">{existing.tables}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Monthly (incl. GST)</div>
+                <div className="plan-details-value">{fmtRupee(existing.total)}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Started</div>
+                <div className="plan-details-value">{fmtDate(existing.cycle_start || existing.trial_start)}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Renews on</div>
+                <div className="plan-details-value">{fmtDate(existing.next_cycle_start)}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Cycle ends</div>
+                <div className="plan-details-value">{fmtDate(existing.cycle_end)}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Autopay</div>
+                <div className="plan-details-value">{existing.autopay_enabled ? "On" : "Off"}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Last payment</div>
+                <div className="plan-details-value">{fmtDate(existing.last_payment_at)}</div>
+              </div>
+              <div>
+                <div className="plan-details-label">Payment method</div>
+                <div className="plan-details-value" style={{ textTransform: "capitalize" }}>{existing.payment_method || "Razorpay"}</div>
+              </div>
+            </div>
+            {existing.pending_tables && existing.pending_tables !== existing.tables && (
+              <div className="plan-pending">
+                Scheduled: <b>{existing.pending_tables} tables</b> ({fmtRupee(existing.pending_total)}/mo) from {fmtEffective}.
+              </div>
+            )}
+            {existing.autopay_enabled && (
+              <div className="renew-note">
+                <Repeat size={16} />
+                <span>Renewal is automatic. Next debit {fmtDate(existing.next_cycle_start)} for {fmtRupee(existing.total)}.</span>
+              </div>
+            )}
+            {!addingTables && (
+              <button
+                type="button"
+                className="mini-btn"
+                data-testid="add-tables-toggle"
+                onClick={() => {
+                  setAddingTables(true);
+                  setTables(existing.tables || minT);
+                  setTab("calc");
+                }}
+                style={{ marginTop: 14 }}
+              >
+                <Plus size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                Add or change tables
+              </button>
+            )}
+            {addingTables && (
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  setAddingTables(false);
+                  setTables(existing.tables);
+                }}
+                style={{ marginTop: 12 }}
+              >
+                Cancel table change
+              </button>
+            )}
+          </div>
+        )}
+
+        {addingTables && isChangeRequest && (
+          <div className="sub-change-hint" data-testid="sub-change-hint">
+            <RefreshCw size={16} color="var(--gold)" />
+            <div>
+              {isProratedUpgrade ? (
+                <>Pay only for extra tables for the days left. From <b>{fmtDate(prorate?.next_cycle_start || existing.next_cycle_start)}</b> the full {tables}-table plan is billed.</>
+              ) : tables < existing.tables ? (
+                <>Reducing to <b>{tables} tables</b> takes effect from <b>{fmtEffective}</b>.</>
+              ) : (
+                <>Updating to <b>{tables} tables</b> from <b>{fmtEffective}</b>.</>
               )}
             </div>
           </div>
         )}
 
-        {isProratedUpgrade && prorate && (
+        {addingTables && isProratedUpgrade && prorate && (
           <div className="prorate-card" data-testid="prorate-card">
             <div className="prorate-card-title">Pay only for days left</div>
             <div className="prorate-card-msg">{prorate.message}</div>
@@ -536,32 +606,36 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
           </div>
         )}
 
-        {tab === "calc" && pricing && (
+        {(!hasActive || addingTables) && tab === "calc" && pricing && (
           <>
             {/* Calculator hero */}
             <div className="calc-hero" data-testid="calc-hero">
               <div className="calc-label">ZENTAAP PRICING</div>
               <div className="calc-title">Pay for exactly what you use</div>
 
-              <div className="slider-wrap">
-                <div className="slider-top">
-                  <div className="slider-q">How many tables does your restaurant have?</div>
-                  <div className="table-num" data-testid="tables-num">{tables}</div>
+              <div className="table-count-wrap">
+                <div className="slider-q">{hasActive ? "How many tables do you need?" : "How many tables does your restaurant have?"}</div>
+                <div className="table-count-row">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={minT}
+                    max={maxT}
+                    value={tables}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") return;
+                      const n = parseInt(raw, 10);
+                      if (Number.isNaN(n)) return;
+                      setTables(Math.min(maxT, Math.max(minT, n)));
+                    }}
+                    onBlur={() => setTables((t) => Math.min(maxT, Math.max(minT, t || minT)))}
+                    className="table-count-input"
+                    data-testid="tables-num"
+                  />
+                  <span className="table-count-suffix">tables</span>
                 </div>
-                <input
-                  type="range"
-                  min={minT}
-                  max={maxT}
-                  value={tables}
-                  onChange={(e) => setTables(parseInt(e.target.value, 10))}
-                  className="table-slider"
-                  data-testid="tables-slider"
-                />
-                <div className="slider-marks">
-                  {sliderMarks.map((n) => (
-                    <span key={n}>{n}</span>
-                  ))}
-                </div>
+                <div className="table-count-hint">₹{pricing.per_table} per table / month · enter any count</div>
               </div>
 
               <div className="result-grid">
@@ -734,7 +808,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
           </>
         )}
 
-        {tab === "break" && pricing && (
+        {(!hasActive || addingTables) && tab === "break" && pricing && (
           <div className="breakdown" data-testid="breakdown-box">
             <div className="bk-header">
               <span>MONTHLY INVOICE — ZENTAAP</span>
@@ -759,8 +833,10 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
           </div>
         )}
 
+        {(!hasActive || (addingTables && isChangeRequest)) && (
+          <>
         <button
-          className="submit-btn"
+          className={`submit-btn ${isExpired ? "renew-btn" : ""}`}
           onClick={onSubscribe}
           disabled={paying || (isUpgradeIntent && !prorate)}
           data-testid="subscribe-btn"
@@ -775,16 +851,18 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                 : isUpgradeNow
                   ? `Pay ${fmtRupee(prorate.total_with_tax)} · unlock ${tables} tables`
                   : hasActive
-                    ? (isChangeRequest
-                        ? `Schedule change to ${tables} tables · effective ${fmtEffective}`
-                        : `Manage plan · ${fmtRupee(pricing?.total_with_tax)}/mo`)
-                    : introEligible
-                      ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · includes 4 extra days`
-                      : `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`}
+                    ? `Confirm ${tables} tables · effective ${fmtEffective}`
+                    : isExpired
+                      ? `Renew · ${fmtRupee(pricing?.total_with_tax)} /mo`
+                      : introEligible
+                        ? `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · includes 4 extra days`
+                        : `Pay ${fmtRupee(pricing?.total_with_tax)} /mo · enable autopay`}
         </button>
         <div className="secure-note" style={{ marginTop: 10, justifyContent: "center", display: "flex" }}>
           <ShieldCheck size={12} /> Secured by Razorpay · Monthly mandate / UPI Autopay · Cancel anytime
         </div>
+          </>
+        )}
       </div>
 
       {!embedded && (
@@ -809,7 +887,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
             }
           }}
         >
-          <div className={`pay-result-card ${payResult.ok ? "ok" : "fail"}`}>
+          <div className={`pay-result-card ${payResult.ok ? "ok" : "fail"} ${payResult.ok && payResult.goManager ? "wide" : ""}`}>
             <button
               type="button"
               className="pay-result-close"
@@ -828,6 +906,33 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
             <div className="pay-result-title">{payResult.title}</div>
             <div className="pay-result-msg">{payResult.message}</div>
             {payResult.detail && <div className="pay-result-detail">{payResult.detail}</div>}
+            {payResult.ok && payResult.goManager && (
+              <div className="setup-guide" data-testid="setup-guide">
+                <div className="setup-guide-title">Next: set up the restaurant</div>
+                <div className="setup-guide-sub">Do these in order so guests can scan and order.</div>
+                <div className="setup-guide-list">
+                  {SETUP_STEPS.map((s, i) => {
+                    const Icon = SETUP_ICONS[s.key];
+                    return (
+                      <button
+                        type="button"
+                        key={s.key}
+                        className="setup-guide-step"
+                        onClick={() => goSetup(s.key)}
+                        data-testid={`setup-step-${s.key}`}
+                      >
+                        <span className="setup-guide-num">{i + 1}</span>
+                        {Icon && <Icon size={16} />}
+                        <span>
+                          <b>{s.title}</b>
+                          <small>{s.body}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <button
               type="button"
               className="submit-btn"
@@ -839,7 +944,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied }
                 if (go) goDashboard();
               }}
             >
-              {payResult.ok ? (embedded ? "Continue" : "Continue to Manager") : "OK"}
+              {payResult.ok ? "Go to Live Orders" : "OK"}
             </button>
           </div>
         </div>

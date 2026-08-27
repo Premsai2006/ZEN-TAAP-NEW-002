@@ -128,7 +128,7 @@ export default function Signup() {
       if (data.slug) localStorage.setItem("mgr_slug", data.slug);
       if (data.restaurant_id) localStorage.setItem("mgr_restaurant_id", data.restaurant_id);
       toast.success("Account created — next, choose your plan.");
-      navigate("/manager", { state: { tab: "subscribe" } });
+      navigate("/manager/subscribe");
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't create your account. Please try again."));
     } finally {
@@ -150,7 +150,7 @@ export default function Signup() {
           Create your account
         </div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22, textAlign: "center" }}>
-          Register your restaurant — we will verify your phone (or email) before creating the account.
+          Register your restaurant — we will send an SMS code to verify your phone before creating the account.
         </div>
 
         <div className="form-group" style={{ marginBottom: 12 }}>

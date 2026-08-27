@@ -13,7 +13,8 @@ from app.database import db
 from app.deps import clear_admin_cookie, require_admin, set_admin_cookie
 from app.models import (
     AdminLoginBody, AdminPasswordBody, PricingUpdateBody,
-    AdminSuspendBody, AdminResetPinBody, AdminBillingOverrideBody,
+    AdminSuspendBody, AdminResetPinBody,
+    # AdminBillingOverrideBody,  # billing override disabled
 )
 from app.services import auth_service as auth
 from app.services import pricing as pricing_svc
@@ -72,10 +73,13 @@ async def bootstrap_admin():
 
 def _public_pricing():
     cfg = pricing_svc.get_pricing_config()
-    preview_n = cfg["min_tables"]
+    preview_n = 10
     preview = pricing_svc.compute_price(preview_n)
     return {
         **cfg,
+        "base_fee": 0,
+        "min_tables": 1,
+        "max_tables": 500,
         "gst_rate_pct": round(cfg["gst_rate"] * 100, 2),
         "preview": preview,
         "updated_at": cfg.get("updated_at"),
@@ -200,30 +204,23 @@ async def update_pricing(body: PricingUpdateBody, sess=Depends(require_admin)):
     per_table = float(body.per_table)
     if per_table <= 0 or per_table > 100_000:
         raise HTTPException(status_code=400, detail="Per-table price must be greater than 0.")
-    base_fee = cfg["base_fee"] if body.base_fee is None else float(body.base_fee)
-    if base_fee < 0 or base_fee > 100_000:
-        raise HTTPException(status_code=400, detail="Base fee cannot be negative.")
     gst_pct = round(cfg["gst_rate"] * 100, 2) if body.gst_rate_pct is None else float(body.gst_rate_pct)
     if gst_pct < 0 or gst_pct > 100:
         raise HTTPException(status_code=400, detail="GST rate must be between 0 and 100.")
-    min_tables = cfg["min_tables"] if body.min_tables is None else int(body.min_tables)
-    max_tables = cfg["max_tables"] if body.max_tables is None else int(body.max_tables)
-    if min_tables < 1 or max_tables < min_tables or max_tables > 200:
-        raise HTTPException(status_code=400, detail="Table range must be 1–200, with max ≥ min.")
 
     saved = await pricing_svc.save_pricing(
         {
             "per_table": per_table,
-            "base_fee": base_fee,
+            "base_fee": 0,
             "gst_rate": round(gst_pct / 100.0, 4),
-            "min_tables": min_tables,
-            "max_tables": max_tables,
+            "min_tables": 1,
+            "max_tables": 500,
         },
         updated_by=sess.get("username") or "",
     )
     logger.info(
-        "Pricing updated by %s: per_table=%s gst=%s tables=%s-%s",
-        sess.get("username"), saved["per_table"], saved["gst_rate"], saved["min_tables"], saved["max_tables"],
+        "Pricing updated by %s: per_table=%s gst=%s",
+        sess.get("username"), saved["per_table"], saved["gst_rate"],
     )
     await _audit(sess.get("username") or "", "pricing.update", detail=f"per_table={saved['per_table']}")
     return _public_pricing()
@@ -342,28 +339,30 @@ async def admin_reset_pin(restaurant_id: str, body: AdminResetPinBody, sess=Depe
     return {"success": True, "new_pin": new_pin}
 
 
-@router.put("/restaurants/{restaurant_id}/billing-override")
-async def admin_billing_override(restaurant_id: str, body: AdminBillingOverrideBody, sess=Depends(require_admin)):
-    raw = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "id": 1})
-    if not raw:
-        raise HTTPException(status_code=404, detail="Restaurant not found.")
-    paise = body.billing_override_paise
-    if paise is None:
-        await db.restaurants.update_one(
-            {"id": restaurant_id},
-            {"$unset": {"billing_override_paise": 1}},
-        )
-        await _audit(sess.get("username") or "", "restaurant.billing_override_clear", restaurant_id)
-        return {"success": True, "billing_override_paise": None}
-    paise = int(paise)
-    if paise < 100 or paise > 1000:
-        raise HTTPException(status_code=400, detail="Override must be ₹1–₹10 (100–1000 paise), or empty to clear.")
-    await db.restaurants.update_one(
-        {"id": restaurant_id},
-        {"$set": {"billing_override_paise": paise}},
-    )
-    await _audit(sess.get("username") or "", "restaurant.billing_override", restaurant_id, detail=str(paise))
-    return {"success": True, "billing_override_paise": paise}
+# Billing override (demo ₹1–₹10 checkout) is disabled.
+# It was never custom restaurant pricing — only a tiny test charge at Razorpay.
+# @router.put("/restaurants/{restaurant_id}/billing-override")
+# async def admin_billing_override(restaurant_id: str, body: AdminBillingOverrideBody, sess=Depends(require_admin)):
+#     raw = await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0, "id": 1})
+#     if not raw:
+#         raise HTTPException(status_code=404, detail="Restaurant not found.")
+#     paise = body.billing_override_paise
+#     if paise is None:
+#         await db.restaurants.update_one(
+#             {"id": restaurant_id},
+#             {"$unset": {"billing_override_paise": 1}},
+#         )
+#         await _audit(sess.get("username") or "", "restaurant.billing_override_clear", restaurant_id)
+#         return {"success": True, "billing_override_paise": None}
+#     paise = int(paise)
+#     if paise < 100 or paise > 1000:
+#         raise HTTPException(status_code=400, detail="Override must be ₹1–₹10 (100–1000 paise), or empty to clear.")
+#     await db.restaurants.update_one(
+#         {"id": restaurant_id},
+#         {"$set": {"billing_override_paise": paise}},
+#     )
+#     await _audit(sess.get("username") or "", "restaurant.billing_override", restaurant_id, detail=str(paise))
+#     return {"success": True, "billing_override_paise": paise}
 
 
 @router.get("/audit")

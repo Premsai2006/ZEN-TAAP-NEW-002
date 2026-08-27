@@ -105,7 +105,7 @@ class RequestOtpBody(BaseModel):
 class VerifyOtpBody(BaseModel):
     contact_number: str
     otp: str
-    new_pin: str
+    new_pin: Optional[str] = None
 
 
 class SubscribeRequest(BaseModel):
@@ -252,5 +252,5 @@ class AdminResetPinBody(BaseModel):
     new_pin: Optional[str] = None
 
 
-class AdminBillingOverrideBody(BaseModel):
-    billing_override_paise: Optional[int] = None
+# class AdminBillingOverrideBody(BaseModel):
+#     billing_override_paise: Optional[int] = None
