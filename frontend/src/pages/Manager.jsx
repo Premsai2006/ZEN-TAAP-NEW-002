@@ -240,7 +240,10 @@ export default function Manager() {
 
         <div
           className="nav-link"
-          onClick={() => setShowLogout(true)}
+          onClick={() => {
+            setMobileNav(false);
+            setShowLogout(true);
+          }}
           data-testid="sidebar-logout-btn"
           style={{ marginTop: 8, color: "var(--red)", borderColor: "rgba(217,99,99,0.25)" }}
         >

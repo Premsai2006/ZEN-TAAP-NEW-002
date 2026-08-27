@@ -9,7 +9,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export default function LogoutDialog({ open, onCancel, onConfirm }) {
+export default function LogoutDialog({
+  open,
+  onCancel,
+  onConfirm,
+  description = "You will be signed out of the manager dashboard and returned to the PIN screen.",
+}) {
   return (
     <AlertDialog open={open} onOpenChange={(v) => !v && onCancel()}>
       <AlertDialogContent
@@ -25,7 +30,7 @@ export default function LogoutDialog({ open, onCancel, onConfirm }) {
             Do you want to logout?
           </AlertDialogTitle>
           <AlertDialogDescription style={{ color: "var(--muted)" }}>
-            You will be signed out of the manager dashboard and returned to the PIN screen.
+            {description}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

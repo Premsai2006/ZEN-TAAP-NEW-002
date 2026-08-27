@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ChefHat, ArrowLeft, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck, Lock, Eye, EyeOff } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ChefHat, Clock, RefreshCw, ClipboardList, Flame, CheckCircle2, PackageCheck, Lock, Eye, EyeOff, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { useInterval } from "@/hooks/useInterval";
+import LogoutDialog from "@/components/manager/LogoutDialog";
 
 const KITCHEN_TOKEN_KEY = "kitchen_token";
 
@@ -143,11 +144,29 @@ const isToday = (iso) => {
 };
 
 export default function Kitchen() {
+  const navigate = useNavigate();
   const { slug: slugParam } = useParams();
   const [authed, setAuthed] = useState(!!localStorage.getItem(KITCHEN_TOKEN_KEY));
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState("active");
   const [refreshing, setRefreshing] = useState(false);
+  const [showLogout, setShowLogout] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch (err) {
+      console.warn("kitchen logout failed:", err?.message);
+    }
+    localStorage.removeItem(KITCHEN_TOKEN_KEY);
+    localStorage.removeItem("kitchen_slug");
+    localStorage.removeItem("mgr_token");
+    localStorage.removeItem("mgr_authed");
+    localStorage.removeItem("mgr_role");
+    setShowLogout(false);
+    setAuthed(false);
+    navigate("/login", { replace: true });
+  };
 
   const refresh = useCallback(async (manual = false) => {
     if (!authed) return;
@@ -206,9 +225,14 @@ export default function Kitchen() {
     <div className="kitchen-shell" data-testid="kitchen-page">
       <div className="kitchen-topbar">
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <Link to="/login" className="sub-back-btn" data-testid="kitchen-back-btn">
-            <ArrowLeft size={16} /> Login
-          </Link>
+          <button
+            type="button"
+            className="sub-logout-btn"
+            onClick={() => setShowLogout(true)}
+            data-testid="kitchen-logout-btn"
+          >
+            <LogOut size={16} /> Logout
+          </button>
           <div className="brand-logo-wrap">
             <img src="/logo.png" alt="ZenTaap" style={{ height: 30 }} />
           </div>
@@ -333,6 +357,13 @@ export default function Kitchen() {
           );
         })}
       </div>
+
+      <LogoutDialog
+        open={showLogout}
+        onCancel={() => setShowLogout(false)}
+        onConfirm={handleLogout}
+        description="You will be signed out of the kitchen display and returned to the login screen."
+      />
     </div>
   );
 }
