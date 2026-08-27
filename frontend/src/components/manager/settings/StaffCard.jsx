@@ -66,14 +66,16 @@ export default function StaffCard() {
     }
   };
 
-  const submitReset = async (row) => {
+  const submitReset = async (e, row) => {
+    e.preventDefault();
+    e.stopPropagation();
     if ((resetPin || "").length < 6) return toast.error("New PIN must be at least 6 digits.");
     try {
       await api.put(`/auth/staff/${row.id}/pin`, { pin: resetPin });
       toast.success("PIN updated. They must sign in again.");
-      setResetFor(null);
       setResetPin("");
-      load();
+      setResetFor(null);
+      await load();
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't reset PIN."));
     }
@@ -84,6 +86,7 @@ export default function StaffCard() {
       <div className="font-serif" style={{ fontSize: 18, marginBottom: 6 }}>Staff accounts</div>
       <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
         Each person logs in with the restaurant phone number and their own PIN.
+        Kitchen staff should use role <b>Kitchen</b> — that PIN opens the kitchen display.
         Deactivating someone revokes their PIN without changing the owner PIN.
       </div>
 
@@ -134,7 +137,11 @@ export default function StaffCard() {
               </div>
             )}
             {resetFor === s.id && (
-              <div style={{ flexBasis: "100%", display: "flex", gap: 8, alignItems: "center" }}>
+              <form
+                onSubmit={(e) => submitReset(e, s)}
+                style={{ flexBasis: "100%", display: "flex", gap: 8, alignItems: "center" }}
+                data-testid={`staff-reset-form-${s.id}`}
+              >
                 <input
                   type="password"
                   inputMode="numeric"
@@ -142,6 +149,7 @@ export default function StaffCard() {
                   value={resetPin}
                   onChange={(e) => setResetPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
                   maxLength={10}
+                  autoComplete="new-password"
                   data-testid={`staff-reset-pin-${s.id}`}
                   style={{
                     flex: 1,
@@ -154,10 +162,20 @@ export default function StaffCard() {
                     borderRadius: 8,
                   }}
                 />
-                <button type="button" className="mini-btn primary" onClick={() => submitReset(s)}>
+                <button type="submit" className="mini-btn primary" data-testid={`staff-reset-save-${s.id}`}>
                   Save
                 </button>
-              </div>
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => {
+                    setResetFor(null);
+                    setResetPin("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
             )}
           </div>
         ))}

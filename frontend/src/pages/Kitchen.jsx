@@ -58,7 +58,8 @@ function KitchenPinGate({ slug, onUnlock }) {
           Enter Kitchen PIN
         </div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 22 }}>
-          Ask your manager for the kitchen PIN — set under <b>Manager → Settings → Kitchen Display PIN</b>.
+          Use the kitchen staff PIN from <b>Manager → Settings → Staff accounts</b> (role: Kitchen).
+          Log in here, or from the main login with the restaurant phone and that PIN.
         </div>
 
         {!slug && (
@@ -94,8 +95,8 @@ function KitchenPinGate({ slug, onUnlock }) {
               inputMode="numeric"
               pattern="[0-9]*"
               value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-              maxLength={6}
+              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 10))}
+              maxLength={10}
               autoFocus={!!slug}
               autoComplete="off"
               autoCorrect="off"

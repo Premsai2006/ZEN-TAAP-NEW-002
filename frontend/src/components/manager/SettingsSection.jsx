@@ -1,7 +1,7 @@
 import AppearanceCard from "./settings/AppearanceCard";
 import BillBrandingForm from "./settings/BillBrandingForm";
-import ChangePinForm from "./settings/ChangePinForm";
-import KitchenPinForm from "./settings/KitchenPinForm";
+// import ChangePinForm from "./settings/ChangePinForm";
+// import KitchenPinForm from "./settings/KitchenPinForm";
 import DevicesCard from "./settings/DevicesCard";
 import StaffCard from "./settings/StaffCard";
 import ForgotPinDialog from "@/components/auth/ForgotPinDialog";
@@ -17,8 +17,12 @@ export default function SettingsSection({ settings, onRefresh, role = "owner" })
       <AppearanceCard />
       {canManageStaff && <StaffCard />}
       <BillBrandingForm settings={settings} onRefresh={onRefresh} />
+      {/* Change PIN removed — Forgot PIN (OTP) already resets the owner PIN.
       {isOwner && <ChangePinForm />}
+      */}
+      {/* Kitchen Display PIN removed — kitchen staff log in with Staff accounts (role: Kitchen).
       {canManageStaff && <KitchenPinForm />}
+      */}
       <DevicesCard />
       {isOwner && (
         <div className="add-item-card" data-testid="forgot-pin-settings">
