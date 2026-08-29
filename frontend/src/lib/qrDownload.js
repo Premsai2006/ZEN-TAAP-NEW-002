@@ -1,11 +1,9 @@
-/** Print-ready table QR tent cards — poster layout with ZenTaap branding. */
+/** Print-ready table QR cards — restaurant name, QR, powered by ZenTaap. */
 
 export const ZENTAAP_LOGO_SRC = "/zentaap-logo.png";
 
 const ORANGE = "#e87d2f";
 const INK = "#161310";
-const NAVY = "#1c2740";
-const CREAM = "#F6EFE4";
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -16,124 +14,46 @@ function loadImage(src) {
   });
 }
 
-let _logoPromise;
-function loadLogo() {
-  if (!_logoPromise) {
-    _logoPromise = loadImage(ZENTAAP_LOGO_SRC).catch(() => null);
-  }
-  return _logoPromise;
-}
-
 function padTable(n) {
   return String(n).padStart(2, "0");
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-}
-
-function logoSize(img, maxW, maxH) {
-  const iw = img.width || 1;
-  const ih = img.height || 1;
-  const scale = Math.min(maxW / iw, maxH / ih);
-  return { w: iw * scale, h: ih * scale };
-}
-
-function drawLogoFit(ctx, img, cx, cy, maxW, maxH) {
-  const { w, h } = logoSize(img, maxW, maxH);
-  ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
-}
-
-/** Clip the wordmark onto a light plate — the asset is designed for white/beige. */
-function drawLogoPlate(ctx, img, cx, cy, maxW, maxH, radius = 18) {
-  const { w, h } = logoSize(img, maxW, maxH);
-  ctx.save();
-  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, radius);
-  ctx.clip();
-  ctx.fillStyle = CREAM;
-  ctx.fill();
-  ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
-  ctx.restore();
-}
-
-function drawPhoneIcon(ctx, x, y, s, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1.6, s * 0.08);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  const pw = s * 0.48;
-  const ph = s * 0.78;
-  const px = x + (s - pw) / 2;
-  const py = y + (s - ph) / 2;
-  roundRect(ctx, px, py, pw, ph, s * 0.12);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(px + pw * 0.28, py + ph * 0.22);
-  ctx.lineTo(px + pw * 0.72, py + ph * 0.22);
-  ctx.moveTo(px + pw * 0.28, py + ph * 0.22);
-  ctx.lineTo(px + pw * 0.28, py + ph * 0.42);
-  ctx.moveTo(px + pw * 0.72, py + ph * 0.22);
-  ctx.lineTo(px + pw * 0.72, py + ph * 0.42);
-  ctx.moveTo(px + pw * 0.22, py + ph * 0.58);
-  ctx.lineTo(px + pw * 0.78, py + ph * 0.58);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawMenuIcon(ctx, x, y, s, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1.6, s * 0.08);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  const mw = s * 0.62;
-  const mh = s * 0.72;
-  const mx = x + (s - mw) / 2;
-  const my = y + (s - mh) / 2;
-  roundRect(ctx, mx, my, mw, mh, s * 0.1);
-  ctx.stroke();
-  ctx.beginPath();
-  for (let i = 0; i < 3; i += 1) {
-    const ly = my + mh * (0.32 + i * 0.2);
-    ctx.moveTo(mx + mw * 0.2, ly);
-    ctx.lineTo(mx + mw * 0.8, ly);
+function wrapText(ctx, text, maxWidth, maxLines = 3) {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const words = raw.split(/\s+/);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = word;
+    }
   }
-  ctx.stroke();
-  ctx.restore();
+  if (line) lines.push(line);
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines);
+  kept[maxLines - 1] = `${kept[maxLines - 1].replace(/…$/, "").trim()}…`;
+  return kept;
 }
 
-function drawClocheIcon(ctx, x, y, s, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = Math.max(1.6, s * 0.08);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  const cx = x + s / 2;
-  const cy = y + s * 0.58;
-  ctx.beginPath();
-  ctx.arc(cx, cy, s * 0.28, Math.PI, 0);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx - s * 0.34, cy);
-  ctx.lineTo(cx + s * 0.34, cy);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, y + s * 0.24, s * 0.05, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+function fitNameLines(ctx, text, maxWidth) {
+  const fallback = "Restaurant";
+  const value = String(text || "").trim() || fallback;
+  for (const size of [56, 48, 42, 36, 30]) {
+    ctx.font = `700 ${size}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
+    const lines = wrapText(ctx, value, maxWidth, 3);
+    const tooWide = lines.some((line) => ctx.measureText(line).width > maxWidth);
+    if (!tooWide || size === 30) return { lines, size };
+  }
+  return { lines: [value], size: 30 };
 }
 
 /**
- * Draw a print-ready tent card: logo, SCAN TO ORDER NOW, QR, 3 steps, footer.
+ * Draw a simple QR card: restaurant name, QR code, powered-by line.
  * @returns {Promise<Blob>} PNG blob
  */
 export async function buildLabeledQrPng(svgEl, tableNum, { restaurantName } = {}) {
@@ -145,10 +65,10 @@ export async function buildLabeledQrPng(svgEl, tableNum, { restaurantName } = {}
     );
   }
   const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
-  const [qrImg, logo] = await Promise.all([loadImage(svgUrl), loadLogo()]);
+  const qrImg = await loadImage(svgUrl);
 
   const W = 900;
-  const H = 1480;
+  const H = 1120;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -157,216 +77,33 @@ export async function buildLabeledQrPng(svgEl, tableNum, { restaurantName } = {}
   ctx.textBaseline = "middle";
 
   ctx.fillStyle = "#ffffff";
-  roundRect(ctx, 14, 14, W - 28, H - 28, 38);
-  ctx.fill();
+  ctx.fillRect(0, 0, W, H);
 
-  ctx.save();
-  roundRect(ctx, 14, 14, W - 28, H - 28, 38);
-  ctx.clip();
+  const nameMaxW = W - 120;
+  const { lines, size } = fitNameLines(ctx, restaurantName, nameMaxW);
+  const lineH = size + 10;
+  const nameBlockH = lines.length * lineH;
+  let y = 120;
 
-  ctx.fillStyle = "rgba(232,125,47,0.06)";
-  [[70, 430], [830, 390], [80, 870], [820, 910], [150, 990]].forEach(([dx, dy]) => {
-    ctx.beginPath();
-    ctx.arc(dx, dy, 16, 0, Math.PI * 2);
-    ctx.fill();
-  });
-
-  // Top-left orange wave
-  ctx.fillStyle = ORANGE;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(W * 0.58, 0);
-  ctx.quadraticCurveTo(W * 0.32, 28, W * 0.2, 96);
-  ctx.quadraticCurveTo(W * 0.08, 168, 0, 188);
-  ctx.closePath();
-  ctx.fill();
-
-  const logoY = 128;
-  if (logo) {
-    drawLogoPlate(ctx, logo, W / 2, logoY, 520, 132, 20);
-  } else {
-    ctx.fillStyle = ORANGE;
-    ctx.font = "800 54px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-    ctx.fillText("ZenTaap", W / 2, logoY);
-  }
-
-  // SCAN TO ORDER NOW — ORDER NOW in brand orange, ticks on both sides
-  const ctaY = 224;
-  ctx.font = "800 32px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  const wScan = ctx.measureText("SCAN TO  ").width;
-  ctx.font = "900 40px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  const wOrderNow = ctx.measureText("ORDER NOW").width;
-  let ctaX = W / 2 - (wScan + wOrderNow) / 2;
-  ctx.textAlign = "left";
   ctx.fillStyle = INK;
-  ctx.font = "800 32px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText("SCAN TO  ", ctaX, ctaY);
-  ctaX += wScan;
-  ctx.fillStyle = ORANGE;
-  ctx.font = "900 40px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText("ORDER NOW", ctaX, ctaY);
-  ctx.textAlign = "center";
-
-  ctx.fillStyle = ORANGE;
-  [W / 2 - 278, W / 2 + 248].forEach((ax) => {
-    ctx.save();
-    ctx.translate(ax, ctaY);
-    ctx.rotate(-0.48);
-    for (let i = 0; i < 3; i += 1) {
-      ctx.fillRect(i * 9, -11, 3, 22);
-    }
-    ctx.restore();
+  ctx.font = `700 ${size}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W / 2, y + i * lineH);
   });
+  y += nameBlockH + 18;
 
-  const tableLabel = `TABLE ${padTable(tableNum)}`;
-  const rest = restaurantName ? String(restaurantName).slice(0, 40) : "";
-  ctx.fillStyle = NAVY;
-  ctx.font = "800 26px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText(tableLabel, W / 2, 272);
-  if (rest) {
-    ctx.fillStyle = "#666666";
-    ctx.font = "500 17px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-    ctx.fillText(rest, W / 2, 300);
-  }
+  ctx.fillStyle = "#6b6560";
+  ctx.font = "600 28px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
+  ctx.fillText(`Table ${padTable(tableNum)}`, W / 2, y);
+  y += 56;
 
-  const qrSize = 408;
+  const qrSize = 520;
   const qrX = (W - qrSize) / 2;
-  const qrY = rest ? 328 : 318;
-  ctx.fillStyle = INK;
-  roundRect(ctx, qrX - 18, qrY - 18, qrSize + 36, qrSize + 36, 24);
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  roundRect(ctx, qrX - 8, qrY - 8, qrSize + 16, qrSize + 16, 16);
-  ctx.fill();
-  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-
-  if (logo) {
-    const badge = 108;
-    const bx = W / 2;
-    const by = qrY + qrSize / 2;
-    ctx.beginPath();
-    ctx.arc(bx, by, badge / 2 + 7, 0, Math.PI * 2);
-    ctx.fillStyle = ORANGE;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(bx, by, badge / 2 + 2, 0, Math.PI * 2);
-    ctx.fillStyle = CREAM;
-    ctx.fill();
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(bx, by, badge / 2, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.fillStyle = CREAM;
-    ctx.fill();
-    drawLogoFit(ctx, logo, bx, by, badge - 8, badge - 16);
-    ctx.restore();
-  }
-
-  const stepY = qrY + qrSize + 86;
-  const steps = [
-    { label: "SCAN", rest: "the QR code", icon: drawPhoneIcon },
-    { label: "CHOOSE", rest: "your items", icon: drawMenuIcon },
-    { label: "ENJOY", rest: "your meal", icon: drawClocheIcon },
-  ];
-  const colW = 260;
-  const startX = (W - colW * 3) / 2 + colW / 2;
-  steps.forEach((step, i) => {
-    const sx = startX + i * colW;
-    const iconCx = sx - 74;
-    const iconR = 22;
-    const iconSize = 26;
-
-    ctx.strokeStyle = ORANGE;
-    ctx.lineWidth = 2.6;
-    ctx.beginPath();
-    ctx.arc(iconCx, stepY, iconR, 0, Math.PI * 2);
-    ctx.stroke();
-    step.icon(ctx, iconCx - iconSize / 2, stepY - iconSize / 2, iconSize, INK);
-
-    const numX = sx - 38;
-    ctx.fillStyle = ORANGE;
-    ctx.beginPath();
-    ctx.arc(numX, stepY - 8, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "800 12px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-    ctx.fillText(String(i + 1), numX, stepY - 7);
-
-    ctx.textAlign = "left";
-    ctx.font = "800 15px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-    ctx.fillStyle = INK;
-    ctx.fillText(step.label, sx - 22, stepY - 8);
-    ctx.font = "500 13px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-    ctx.fillStyle = "#444444";
-    ctx.fillText(step.rest, sx - 22, stepY + 12);
-    ctx.textAlign = "center";
-
-    if (i < 2) {
-      ctx.strokeStyle = "rgba(22,19,16,0.14)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(sx + colW / 2, stepY - 26);
-      ctx.lineTo(sx + colW / 2, stepY + 26);
-      ctx.stroke();
-    }
-  });
-
-  const footTop = H - 278;
-  ctx.fillStyle = INK;
-  ctx.beginPath();
-  ctx.moveTo(0, H);
-  ctx.lineTo(W, H);
-  ctx.lineTo(W, footTop + 62);
-  ctx.quadraticCurveTo(W * 0.74, footTop - 18, W * 0.5, footTop + 22);
-  ctx.quadraticCurveTo(W * 0.22, footTop + 68, 0, footTop + 12);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = ORANGE;
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(0, footTop + 12);
-  ctx.quadraticCurveTo(W * 0.22, footTop + 68, W * 0.5, footTop + 22);
-  ctx.quadraticCurveTo(W * 0.74, footTop - 18, W, footTop + 62);
-  ctx.stroke();
-
-  ctx.strokeStyle = ORANGE;
-  ctx.lineWidth = 2.6;
-  ctx.beginPath();
-  ctx.arc(W / 2, footTop + 86, 15, Math.PI, 0);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(W / 2 - 20, footTop + 86);
-  ctx.lineTo(W / 2 + 20, footTop + 86);
-  ctx.stroke();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "italic 700 34px Georgia, 'Times New Roman', serif";
-  ctx.fillText("Good Food", W / 2, footTop + 128);
-  ctx.fillStyle = ORANGE;
-  ctx.font = "800 30px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText("Great Experience!", W / 2, footTop + 166);
+  ctx.drawImage(qrImg, qrX, y, qrSize, qrSize);
 
   ctx.fillStyle = ORANGE;
-  ctx.beginPath();
-  ctx.moveTo(W / 2, footTop + 188);
-  ctx.bezierCurveTo(W / 2 - 10, footTop + 178, W / 2 - 16, footTop + 190, W / 2, footTop + 200);
-  ctx.bezierCurveTo(W / 2 + 16, footTop + 190, W / 2 + 10, footTop + 178, W / 2, footTop + 188);
-  ctx.fill();
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "600 13px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText("Safe   ·   Contactless   ·   Fast", 210, H - 46);
-  ctx.fillStyle = ORANGE;
-  ctx.font = "700 13px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
-  ctx.fillText("Powered by ZenTaap", W - 168, H - 46);
-
-  ctx.restore();
-
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = 9;
-  roundRect(ctx, 14, 14, W - 28, H - 28, 38);
-  ctx.stroke();
+  ctx.font = "600 22px -apple-system, BlinkMacSystemFont, Arial, sans-serif";
+  ctx.fillText("Powered by ZenTaap", W / 2, H - 72);
 
   return await new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -429,7 +166,7 @@ export async function printAllLabeledQrs(items, { restaurantName } = {}) {
     const png = await buildLabeledQrPng(svgEl, tableNum, { restaurantName });
     const dataUrl = await blobToDataUrl(png);
     cards.push(
-      `<div class="qrcard"><img src="${dataUrl}" alt="Table ${tableNum}" width="420" height="690" /></div>`
+      `<div class="qrcard"><img src="${dataUrl}" alt="Table ${tableNum}" width="420" height="522" /></div>`
     );
   }
   if (cards.length === 0) throw new Error("No QR codes ready");

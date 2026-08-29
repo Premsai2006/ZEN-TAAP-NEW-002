@@ -195,7 +195,9 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
     preserve_cycle = bool(doc.get("pending_checkout_preserve_cycle"))
     next_cycle_keep = doc.get("pending_checkout_next_cycle")
     already_active = str(doc.get("subscription_status") or "").lower() == "active"
-    keep_cycle = preserve_cycle or (already_active and payment_kind == "upgrade_proration")
+    keep_cycle = preserve_cycle or payment_kind == "renewal_test" or (
+        already_active and payment_kind == "upgrade_proration"
+    )
 
     client = razorpay_client()
     pay = None
@@ -448,7 +450,7 @@ async def razorpay_webhook(request: Request):
             rest_doc = await rest_svc.get_by_id(rid) or {}
             kind = notes.get("kind") or rest_doc.get("pending_checkout_kind") or "subscription"
             # Monthly renew charges start a new cycle; upgrade auth keeps current cycle dates
-            is_upgrade = kind == "upgrade_proration" or (
+            is_upgrade = kind in ("upgrade_proration", "renewal_test") or (
                 event == "payment.captured"
                 and str(notes.get("preserve_cycle") or "").strip() in ("1", "true", "True")
             )

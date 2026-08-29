@@ -39,7 +39,7 @@ const SETUP_STEPS = [
 ];
 const SETUP_ICONS = { profile: User, menu: UtensilsCrossed, tables: QrCode, settings: Users };
 
-export default function Subscribe({ embedded = false, onGoDashboard, onApplied, onGoTab } = {}) {
+export default function Subscribe({ embedded = false, restaurantName, onGoDashboard, onApplied, onGoTab } = {}) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("calc");
   const [tables, setTables] = useState(14);
@@ -186,7 +186,7 @@ export default function Subscribe({ embedded = false, onGoDashboard, onApplied, 
     }
     setZippingQrs(true);
     try {
-      await downloadAllQrsZip(items, { slug });
+      await downloadAllQrsZip(items, { slug, restaurantName });
       toast.success(`Downloaded ZIP with ${items.length} table QRs`);
     } catch {
       toast.error("Couldn't create the ZIP. Please try again.");

@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Monthly renewals for up to 10 years
 SUBSCRIPTION_TOTAL_COUNT = 120
+# Restaurant flag short_renewal_test: first AutoPay ~45 min after checkout (prod renewal test).
+SHORT_RENEWAL_TEST_SECONDS = 45 * 60
 
 
 async def ensure_customer(restaurant_id: str) -> str:
@@ -366,14 +368,21 @@ async def create_checkout_subscription(
     price = compute_price_for_restaurant(int(tables), doc)
     amount_paise = int(price["amount_paise"])
     intro = intro_trial_eligible(doc) and status not in ("active", "trial")
+    renewal_test = bool(doc.get("short_renewal_test"))
 
     intro_start_at = start_at
     intro_next_iso = None
-    if intro and not intro_start_at:
+    if renewal_test:
+        # Mandate auth in Checkout now; first plan debit in ~45 minutes.
+        intro = False
+        intro_start_at = int(time.time()) + SHORT_RENEWAL_TEST_SECONDS
+        intro_next_iso = datetime.fromtimestamp(intro_start_at, tz=timezone.utc).isoformat()
+    elif intro and not intro_start_at:
         intro_end = first_paid_cycle_end(datetime.now(timezone.utc), intro=True)
         intro_start_at = int(intro_end.timestamp())
         intro_next_iso = intro_end.isoformat()
 
+    kind = "renewal_test" if renewal_test else ("first_cycle_intro" if intro else "monthly_mandate")
     payload = {
         "plan_id": plan_id,
         "customer_id": customer_id,
@@ -383,11 +392,12 @@ async def create_checkout_subscription(
         "notes": {
             "restaurant_id": restaurant_id,
             "tables": str(int(tables)),
-            "kind": "first_cycle_intro" if intro else "monthly_mandate",
+            "kind": kind,
             "product": "zentaap",
             "billing_override": "1" if price.get("billing_override") else "0",
             "previous_subscription_id": old_sub if status in ("active", "trial") else "",
             "intro_trial": "1" if intro else "0",
+            "preserve_cycle": "1" if renewal_test else "0",
         },
     }
     if intro:
@@ -400,7 +410,7 @@ async def create_checkout_subscription(
                 }
             }
         ]
-    # Optional future start (intro bonus, or after mid-cycle upgrade) — still collects mandate auth now
+    # Optional future start (intro bonus, renewal test, or after mid-cycle upgrade)
     if intro_start_at and int(intro_start_at) > int(time.time()) + 60:
         payload["start_at"] = int(intro_start_at)
 
@@ -410,8 +420,8 @@ async def create_checkout_subscription(
         "pending_checkout_tables": int(tables),
         "pending_checkout_subscription_id": sub["id"],
         "pending_checkout_amount_paise": amount_paise,
-        "pending_checkout_kind": "first_cycle_intro" if intro else "monthly_mandate",
-        "pending_checkout_preserve_cycle": False,
+        "pending_checkout_kind": kind,
+        "pending_checkout_preserve_cycle": bool(renewal_test),
         "pending_checkout_next_cycle": intro_next_iso,
         "razorpay_plan_id": plan_id,
         "pending_razorpay_plan_tables": int(tables),
@@ -431,7 +441,9 @@ async def create_checkout_subscription(
         if price.get("billing_override")
         else f"ZenTaap {tables} tables — monthly autopay mandate"
     )
-    if intro:
+    if renewal_test:
+        desc = f"Authorize mandate now · first AutoPay in ~45 minutes · ₹{amount_paise/100:.0f}/mo"
+    elif intro:
         desc = (
             f"Pay ₹{amount_paise/100:.0f} now · first AutoPay in 1 month + {TRIAL_DAYS} extra days"
         )
@@ -454,8 +466,9 @@ async def create_checkout_subscription(
         "billing_override": bool(price.get("billing_override")),
         "intro_trial": intro,
         "intro_bonus_days": TRIAL_DAYS if intro else 0,
+        "renewal_test": renewal_test,
         "description": desc,
-        "start_at": intro_start_at if intro else start_at,
+        "start_at": intro_start_at,
         "next_cycle_start": intro_next_iso,
     }
     return checkout, sub

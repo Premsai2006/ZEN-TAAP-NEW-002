@@ -142,6 +142,7 @@ async def activate_paid_subscription(
         "pending_checkout_kind": None,
         "pending_checkout_preserve_cycle": None,
         "pending_checkout_next_cycle": None,
+        "short_renewal_test": False,
     }
     if apply_intro:
         update["trial_start"] = now.isoformat()

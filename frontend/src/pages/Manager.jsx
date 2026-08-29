@@ -359,6 +359,7 @@ export default function Manager() {
           <Suspense fallback={<div style={{ padding: 24, color: "var(--muted)" }}>Loading subscription…</div>}>
             <Subscribe
               embedded
+              restaurantName={settings?.restaurant_name}
               onApplied={refresh}
               onGoTab={(key) => setActive(key)}
               onGoDashboard={() => {

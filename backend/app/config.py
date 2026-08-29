@@ -18,8 +18,10 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_PAYMENT_LINK = os.environ.get("RAZORPAY_PAYMENT_LINK", "")
 
 # OTP SMS via 2Factor.in — set TWOFACTOR_API_KEY in .env
+# TWOFACTOR_OTP_TEMPLATE must match an approved SMS template in the 2Factor dashboard
+# (OTP Services → Manage OTP Templates). Without it, 2Factor delivers a voice call.
 TWOFACTOR_API_KEY = (os.environ.get("TWOFACTOR_API_KEY") or "").strip()
-TWOFACTOR_OTP_TEMPLATE = (os.environ.get("TWOFACTOR_OTP_TEMPLATE") or "").strip()
+TWOFACTOR_OTP_TEMPLATE = (os.environ.get("TWOFACTOR_OTP_TEMPLATE") or "ZENTAAP").strip() or "ZENTAAP"
 TWOFACTOR_COUNTRY_CODE = (os.environ.get("TWOFACTOR_COUNTRY_CODE") or "91").strip() or "91"
 
 # OTP email via Gmail SMTP (Google App Password) — fallback if SMS is not configured

@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, QrCode, Link2, Lock } from "lucide-react";
-import { ZENTAAP_LOGO_SRC } from "@/lib/qrDownload";
+import { Download, Link2, Lock, QrCode, Search } from "lucide-react";
 import { toast } from "sonner";
 import { restaurantOrderUrl } from "@/lib/qr";
 import {
@@ -12,6 +11,58 @@ import {
   triggerBlobDownload,
 } from "@/lib/qrDownload";
 import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
+
+const OPEN_ORDER = new Set(["new", "cooking", "done"]);
+
+function TableQrCard({
+  n,
+  restaurantName,
+  slug,
+  qrLocked,
+  onDownload,
+  onCopy,
+}) {
+  return (
+    <div className="table-qr-card qr-simple-card" data-testid={`table-${n}`}>
+      <div className="qr-simple-name">{restaurantName || "Restaurant"}</div>
+      <div className="qr-simple-table">Table {n}</div>
+      <div className="qr-simple-qr" data-testid={`table-qr-${n}`}>
+        <QRCodeSVG
+          value={restaurantOrderUrl(slug, n)}
+          size={148}
+          bgColor="#ffffff"
+          fgColor="#161310"
+          level="H"
+        />
+      </div>
+      <div className="qr-simple-powered">Powered by ZenTaap</div>
+      <div className="qr-simple-actions">
+        <button
+          type="button"
+          onClick={() => onDownload(n)}
+          className="mini-btn"
+          data-testid={`download-qr-${n}`}
+          style={{ fontSize: 11 }}
+          disabled={!slug && !qrLocked}
+        >
+          <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+          Download
+        </button>
+        <button
+          type="button"
+          onClick={() => onCopy(n)}
+          className="mini-btn"
+          data-testid={`copy-qr-link-${n}`}
+          style={{ fontSize: 11 }}
+          disabled={!slug && !qrLocked}
+        >
+          <Link2 size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
+          Copy link
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function TablesSection({
   orders,
@@ -24,7 +75,6 @@ export default function TablesSection({
   const navigate = useNavigate();
   const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
   const tableCount = useMemo(() => {
-    // Total tables come from the active subscription; fall back to 15 for unsubscribed/explore mode.
     const t = subscription?.tables;
     if (Number.isFinite(t) && t > 0) return t;
     return 15;
@@ -33,27 +83,68 @@ export default function TablesSection({
   const qrLocked = Boolean(locked);
   const isExpired = subscription?.status === "expired";
 
-  const tableMap = {};
-  for (const o of orders || []) {
-    if (["new", "cooking", "done"].includes(o.status) && o.table > 0) {
-      tableMap[o.table] = (tableMap[o.table] || 0) + o.amount;
+  const amountByTable = useMemo(() => {
+    const map = {};
+    for (const o of orders || []) {
+      if (OPEN_ORDER.has(o.status) && o.table > 0) {
+        map[o.table] = (map[o.table] || 0) + o.amount;
+      }
     }
-  }
+    return map;
+  }, [orders]);
 
-  const [showQRs, setShowQRs] = useState(false);
+  const [tab, setTab] = useState("floor");
   const [zipping, setZipping] = useState(false);
   const [page, setPage] = useState(1);
-  const qrPrintRef = useRef(null);
-
-  // When locked/expired, open the gallery so the paywall is visible.
-  useEffect(() => {
-    if (qrLocked) setShowQRs(true);
-  }, [qrLocked]);
+  const [lookupInput, setLookupInput] = useState("");
+  const [lookupTable, setLookupTable] = useState(null);
+  const [showAllQrs, setShowAllQrs] = useState(false);
+  const [floorPick, setFloorPick] = useState(null);
 
   const tableNums = useMemo(
     () => Array.from({ length: tableCount }, (_, i) => i + 1),
     [tableCount]
   );
+
+  const occupiedNums = useMemo(
+    () => tableNums.filter((n) => amountByTable[n]),
+    [tableNums, amountByTable]
+  );
+  const occupiedCount = occupiedNums.length;
+  const emptyCount = tableCount - occupiedCount;
+
+  const lookupParsed = lookupInput === "" ? NaN : parseInt(lookupInput, 10);
+  const lookupValid =
+    Number.isInteger(lookupParsed) && lookupParsed >= 1 && lookupParsed <= tableCount;
+
+  useEffect(() => {
+    setPage(1);
+    setLookupInput("");
+    setLookupTable(null);
+    setShowAllQrs(false);
+    setFloorPick(null);
+  }, [tableCount]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [showAllQrs]);
+
+  const openQrForTable = (n) => {
+    setTab("qr");
+    setShowAllQrs(false);
+    setLookupInput(String(n));
+    setLookupTable(n);
+  };
+
+  const viewLookup = (e) => {
+    e?.preventDefault?.();
+    if (!lookupValid) {
+      toast.error(`Enter a table number from 1 to ${tableCount}.`);
+      return;
+    }
+    setShowAllQrs(false);
+    setLookupTable(lookupParsed);
+  };
 
   const getQrSvg = (n) => document.querySelector(`[data-qr-svg="${n}"] svg`);
 
@@ -90,7 +181,7 @@ export default function TablesSection({
       .map((n) => ({ tableNum: n, svgEl: getQrSvg(n) }))
       .filter((x) => x.svgEl);
     if (items.length === 0) {
-      return toast.error("QR codes aren't ready yet. Tap Show QR codes, then try again.");
+      return toast.error("QR codes aren't ready yet. Please wait a moment and try again.");
     }
     setZipping(true);
     try {
@@ -116,7 +207,6 @@ export default function TablesSection({
 
   return (
     <div className="section active" data-testid="tables-section">
-      {/* Off-screen but fully sized so QR SVGs paint for download */}
       <div
         aria-hidden="true"
         style={{
@@ -144,30 +234,32 @@ export default function TablesSection({
         ))}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 13, color: "var(--muted)" }} data-testid="tables-summary">
-          {tableCount} tables {subscription?.tables ? `· from your subscription` : "· default (no active subscription)"}
-          {slug ? (
-            <span style={{ marginLeft: 8 }} data-testid="tables-slug-hint">
-              · QR → <code style={{ color: "var(--gold)" }}>/r/{slug}?table=N</code>
-            </span>
-          ) : (
-            <span style={{ marginLeft: 8, color: "var(--red)" }} data-testid="tables-slug-missing">
-              · Set restaurant URL in Profile to enable table QRs
-            </span>
-          )}
+      <div className="tables-toolbar">
+        <div className="tables-summary" data-testid="tables-summary">
+          <div className="tables-heading">
+            <span className="tables-heading-count">{tableCount}</span>
+            <span className="tables-heading-label">tables</span>
+          </div>
+          <div className="filter-tabs" data-testid="tables-tabs">
+            <button
+              type="button"
+              className={`filter-tab ${tab === "floor" ? "active" : ""}`}
+              onClick={() => setTab("floor")}
+              data-testid="tables-tab-floor"
+            >
+              Floor
+            </button>
+            <button
+              type="button"
+              className={`filter-tab ${tab === "qr" ? "active" : ""}`}
+              onClick={() => setTab("qr")}
+              data-testid="tables-tab-qr"
+            >
+              QR codes
+            </button>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => setShowQRs((v) => !v)}
-            className="mini-btn"
-            data-testid="toggle-qr-btn"
-            style={{ borderColor: showQRs ? "var(--gold)" : "var(--line)", color: showQRs ? "var(--gold)" : "var(--text)" }}
-          >
-            <QrCode size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-            {showQRs ? "Hide QR codes" : "Show QR codes"}
-          </button>
+        {tab === "qr" && (
           <button
             type="button"
             onClick={downloadAllQRs}
@@ -179,127 +271,165 @@ export default function TablesSection({
             <Download size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
             {zipping ? "Preparing ZIP…" : qrLocked ? "Pay to unlock" : "Download all QRs"}
           </button>
-        </div>
+        )}
       </div>
 
-      <div className="tables-grid">
-        {tableNums.map((n) => {
-          const occupied = !!tableMap[n];
-          return (
-            <div
-              key={n}
-              className={`table-box ${occupied ? "occupied" : "empty"}`}
-              data-testid={`table-${n}`}
-            >
-              <div className="table-num">{n}</div>
-              <div className="table-status-text">{occupied ? "Occupied" : "Empty"}</div>
-              {occupied && <div className="table-amount">₹{tableMap[n]}</div>}
-            </div>
-          );
-        })}
-      </div>
-
-      {showQRs && (
-        <div ref={qrPrintRef} style={{ marginTop: 24 }} data-testid="tables-qr-grid">
-          <div className="font-serif" style={{ fontSize: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-            <QrCode size={16} color="var(--gold)" />
-            Table QR Codes — each QR opens the menu locked to that table
+      {tab === "floor" && (
+        <>
+          <div className="tables-pills" data-testid="tables-occupancy">
+            <span className={`tables-pill occupied${occupiedCount ? "" : " is-zero"}`}>
+              <b>{occupiedCount}</b> occupied
+            </span>
+            <span className="tables-pill empty">
+              <b>{emptyCount}</b> empty
+            </span>
           </div>
+
+          <div className="tables-floor" data-testid="tables-floor">
+            {tableNums.map((n) => {
+              const occupied = Boolean(amountByTable[n]);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  className={`tables-floor-num${occupied ? " occupied" : ""}${floorPick === n ? " is-focus" : ""}`}
+                  onClick={() => setFloorPick(n)}
+                  title={occupied ? `Table ${n} · occupied` : `Table ${n} · empty`}
+                  data-testid={`floor-table-${n}`}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="tables-block-title">Occupied now</div>
+          {occupiedNums.length === 0 ? (
+            <div className="tables-qr-empty" data-testid="tables-occupied-empty">
+              All tables are empty.
+            </div>
+          ) : (
+            <div className="tables-occ-grid" data-testid="tables-occupied-list">
+              {occupiedNums.map((n) => (
+                <div
+                  key={n}
+                  className={`tables-occ-card${floorPick === n ? " is-focus" : ""}`}
+                  data-testid={`occupied-table-${n}`}
+                >
+                  <div className="tables-occ-num">{n}</div>
+                  <div className="tables-occ-meta">Occupied · ₹{amountByTable[n]}</div>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => openQrForTable(n)}
+                    data-testid={`occupied-view-qr-${n}`}
+                  >
+                    <QrCode size={12} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                    View QR
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "qr" && (
+        <>
           {!slug && (
-            <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 14 }} data-testid="qr-slug-warning">
+            <div className="tables-slug-warning" data-testid="qr-slug-warning">
               Restaurant URL is missing. Go to Profile and set it, then come back to generate linked QRs.
             </div>
           )}
+
+          <form className="tables-lookup" onSubmit={viewLookup} data-testid="tables-qr-lookup">
+            <div className="tables-lookup-left">
+              <label className="tables-lookup-label" htmlFor="table-qr-lookup">
+                Table number
+              </label>
+              <div className="tables-lookup-bar">
+                <input
+                  id="table-qr-lookup"
+                  className="tables-lookup-input"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder={`1–${tableCount}`}
+                  value={lookupInput}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^\d]/g, "");
+                    setLookupInput(raw);
+                  }}
+                  data-testid="tables-lookup-input"
+                />
+                <button
+                  type="submit"
+                  className="tables-lookup-search"
+                  disabled={!lookupValid}
+                  aria-label="View QR"
+                  data-testid="tables-lookup-btn"
+                >
+                  <Search size={16} />
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              className={`mini-btn tables-show-all-qrs${showAllQrs ? " primary" : ""}`}
+              onClick={() => {
+                setShowAllQrs(true);
+                setLookupTable(null);
+              }}
+              data-testid="tables-show-all-qrs"
+            >
+              <QrCode size={13} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+              Show all QR codes
+            </button>
+          </form>
+
           <div className={`qr-locked-wrap${qrLocked ? " is-locked" : ""}`} data-testid="tables-qr-locked-wrap">
             <div className={qrLocked ? "qr-locked-blur" : undefined}>
-              <div className="tables-qr-grid">
-                {paginate(tableNums, page).map((n) => {
-                  const url = restaurantOrderUrl(slug, n);
-                  return (
-                    <div key={n} className="table-qr-card qr-poster-card" data-testid={`table-qr-${n}`}>
-                      <div className="qr-poster-accent" aria-hidden="true" />
-                      <div className="qr-poster-logo-wrap">
-                        <img src={ZENTAAP_LOGO_SRC} alt="ZenTaap" className="qr-poster-logo" />
-                      </div>
-                      <div className="qr-poster-cta">
-                        SCAN TO <span>ORDER NOW</span>
-                      </div>
-                      <div className="qr-poster-table">Table {n}</div>
-                      {restaurantName ? (
-                        <div className="qr-poster-rest">{restaurantName}</div>
-                      ) : null}
-                      <div className="qr-poster-qr">
-                        <QRCodeSVG
-                          value={url}
-                          size={132}
-                          bgColor="#ffffff"
-                          fgColor="#161310"
-                          level="H"
-                        />
-                        <img src={ZENTAAP_LOGO_SRC} alt="" className="qr-poster-qr-badge" />
-                      </div>
-                      <div className="qr-poster-steps">
-                        <div className="qr-poster-step">
-                          <span className="qr-poster-step-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="7" y="3" width="10" height="18" rx="2" />
-                              <path d="M9 7h6M9 7v3M15 7v3M8 14h8" />
-                            </svg>
-                          </span>
-                          <span className="qr-poster-step-copy"><i>1</i><b>SCAN</b> the QR</span>
-                        </div>
-                        <div className="qr-poster-step">
-                          <span className="qr-poster-step-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="5" y="4" width="14" height="16" rx="2" />
-                              <path d="M8 9h8M8 13h8M8 17h5" />
-                            </svg>
-                          </span>
-                          <span className="qr-poster-step-copy"><i>2</i><b>CHOOSE</b> items</span>
-                        </div>
-                        <div className="qr-poster-step">
-                          <span className="qr-poster-step-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#161310" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M6 14a6 6 0 0 1 12 0" />
-                              <path d="M4 14h16" />
-                              <circle cx="12" cy="7" r="1.2" fill="#161310" stroke="none" />
-                            </svg>
-                          </span>
-                          <span className="qr-poster-step-copy"><i>3</i><b>ENJOY</b> meal</span>
-                        </div>
-                      </div>
-                      <div className="qr-poster-foot">
-                        <em>Good Food</em>
-                        <strong>Great Experience!</strong>
-                      </div>
-                      <div className="qr-poster-actions">
-                        <button
-                          type="button"
-                          onClick={() => downloadOneQR(n)}
-                          className="mini-btn"
-                          data-testid={`download-qr-${n}`}
-                          style={{ fontSize: 11 }}
-                          disabled={!slug && !qrLocked}
-                        >
-                          <Download size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                          Download
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => copyLink(n)}
-                          className="mini-btn"
-                          data-testid={`copy-qr-link-${n}`}
-                          style={{ fontSize: 11 }}
-                          disabled={!slug && !qrLocked}
-                        >
-                          <Link2 size={11} style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />
-                          Copy link
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              {!showAllQrs && !lookupTable && (
+                <div className="tables-qr-empty" data-testid="tables-qr-idle">
+                  Enter a table number to see that QR, or show all QR codes to print and download.
+                </div>
+              )}
+              {lookupTable && !showAllQrs && (
+                <div className="tables-qr-grid tables-qr-grid-one" data-testid="tables-qr-grid">
+                  <TableQrCard
+                    n={lookupTable}
+                    restaurantName={restaurantName}
+                    slug={slug}
+                    qrLocked={qrLocked}
+                    onDownload={downloadOneQR}
+                    onCopy={copyLink}
+                  />
+                </div>
+              )}
+              {showAllQrs && (
+                <>
+                  <div className="tables-qr-grid" data-testid="tables-qr-grid">
+                    {paginate(tableNums, page).map((n) => (
+                      <TableQrCard
+                        key={n}
+                        n={n}
+                        restaurantName={restaurantName}
+                        slug={slug}
+                        qrLocked={qrLocked}
+                        onDownload={downloadOneQR}
+                        onCopy={copyLink}
+                      />
+                    ))}
+                  </div>
+                  <PageBar
+                    page={page}
+                    total={tableNums.length}
+                    pageSize={PAGE_SIZE}
+                    onPage={setPage}
+                    testId="tables-page-bar"
+                  />
+                </>
+              )}
             </div>
             {qrLocked && (
               <div className="qr-paywall-overlay" data-testid="tables-qr-paywall">
@@ -323,8 +453,7 @@ export default function TablesSection({
               </div>
             )}
           </div>
-          <PageBar page={page} total={tableNums.length} pageSize={PAGE_SIZE} onPage={setPage} testId="tables-page-bar" />
-        </div>
+        </>
       )}
     </div>
   );

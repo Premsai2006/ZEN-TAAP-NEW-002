@@ -63,7 +63,7 @@ def mask_phone(phone_digits: str) -> str:
 
 
 def send_otp_sms_sync(phone_digits: str, otp: str) -> Tuple[bool, str]:
-    """Send a custom 6-digit OTP via 2Factor SMS API."""
+    """Send a custom 6-digit OTP via 2Factor SMS only (never Voice/call)."""
     if not twofactor_configured():
         return False, "sms_not_configured"
     msisdn = india_msisdn(phone_digits)
@@ -73,11 +73,20 @@ def send_otp_sms_sync(phone_digits: str, otp: str) -> Tuple[bool, str]:
     if not otp:
         return False, "invalid_otp"
 
+    template = (TWOFACTOR_OTP_TEMPLATE or "ZENTAAP").strip() or "ZENTAAP"
     key = quote(TWOFACTOR_API_KEY, safe="-")
-    parts = [TWOFACTOR_BASE, key, "SMS", msisdn, quote(otp, safe="")]
-    if TWOFACTOR_OTP_TEMPLATE:
-        parts.append(quote(TWOFACTOR_OTP_TEMPLATE, safe="-_."))
-    url = "/".join(parts)
+    # Template is required. Hitting /SMS/{phone}/{otp} with no template makes 2Factor
+    # fall back to a voice call on DLT accounts.
+    url = "/".join(
+        [
+            TWOFACTOR_BASE,
+            key,
+            "SMS",
+            msisdn,
+            quote(otp, safe=""),
+            quote(template, safe="-_."),
+        ]
+    )
 
     try:
         r = requests.get(url, timeout=15)
@@ -87,10 +96,11 @@ def send_otp_sms_sync(phone_digits: str, otp: str) -> Tuple[bool, str]:
         return False, "sms_error"
 
     status = str(data.get("Status") or "").strip().lower()
-    if r.ok and status == "success":
-        return True, "sms_ok"
     detail = str(data.get("Details") or r.text or "sms_error")[:200]
-    logger.warning("2Factor OTP rejected: %s", detail)
+    if r.ok and status == "success":
+        logger.info("2Factor SMS OTP accepted template=%s", template)
+        return True, "sms_ok"
+    logger.warning("2Factor SMS OTP rejected template=%s: %s", template, detail)
     return False, "sms_rejected"
 
 
