@@ -27,6 +27,17 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 logger = logging.getLogger(__name__)
 
 
+def _mandate_payment_ok(pay_status: str, sub_status: str) -> bool:
+    """UPI Autopay auth often charges ₹1–₹5 then auto-refunds; sub is still authenticated."""
+    pay = (pay_status or "").lower()
+    sub = (sub_status or "").lower()
+    if pay in ("captured", "authorized"):
+        return True
+    if pay == "refunded" and sub in ("active", "authenticated"):
+        return True
+    return False
+
+
 def _extract_payment_entity(data: dict) -> dict:
     return ((data.get("payload") or {}).get("payment") or {}).get("entity", {}) or {}
 
@@ -201,13 +212,19 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
 
     client = razorpay_client()
     pay = None
+    pay_status = ""
+    sub_meta = fetch_subscription(body.razorpay_subscription_id) or {}
+    sub_status = str(sub_meta.get("status") or "").lower()
+    mandate_ready = sub_status in ("active", "authenticated")
     if client:
         try:
             pay = client.payment.fetch(body.razorpay_payment_id)
             pay_status = str(pay.get("status", "")).lower()
-            if pay_status not in ("captured", "authorized"):
+            if not _mandate_payment_ok(pay_status, sub_status) and not mandate_ready:
                 raise HTTPException(status_code=400, detail="Payment is not completed yet.")
             amount_paise = pay.get("amount", amount_paise)
+            if pay_status == "refunded":
+                amount_paise = 0
             pay_sub = (pay.get("subscription_id") or "").strip()
             if pay_sub and pay_sub != body.razorpay_subscription_id:
                 raise HTTPException(status_code=400, detail="Payment does not belong to this subscription.")
@@ -217,14 +234,16 @@ async def verify_razorpay_subscription(body: VerifySubscriptionBody, sess=Depend
             logger.warning("payment.fetch failed after subscription verify: %s", exc)
             pay = None
 
-    # Signature missing/wrong but Razorpay confirms captured payment for this sub → still activate
+    # Signature missing/wrong: still activate if Razorpay shows captured pay or authenticated mandate
     if not signature_ok:
-        if not pay or str(pay.get("status", "")).lower() not in ("captured", "authorized"):
+        if not mandate_ready and not (pay and _mandate_payment_ok(pay_status, sub_status)):
             raise HTTPException(status_code=400, detail="Subscription payment could not be verified.")
         logger.info(
-            "Activated via payment.fetch fallback restaurant=%s payment=%s",
+            "Activated via payment.fetch fallback restaurant=%s payment=%s pay_status=%s sub_status=%s",
             rid,
             body.razorpay_payment_id,
+            pay_status,
+            sub_status,
         )
 
     updated = await activate_paid_subscription(
