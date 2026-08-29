@@ -373,6 +373,14 @@ async def create_checkout_subscription(
         intro_end = first_paid_cycle_end(datetime.now(timezone.utc), intro=True)
         intro_start_at = int(intro_end.timestamp())
         intro_next_iso = intro_end.isoformat()
+    # Restaurant-only: same checkout, first AutoPay in N minutes (MIT / Autopay test).
+    try:
+        test_mins = int(doc.get("autopay_test_minutes") or 0)
+    except (TypeError, ValueError):
+        test_mins = 0
+    if test_mins >= 5:
+        intro_start_at = int(time.time()) + test_mins * 60
+        intro_next_iso = datetime.fromtimestamp(intro_start_at, tz=timezone.utc).isoformat()
 
     payload = {
         "plan_id": plan_id,
@@ -411,7 +419,7 @@ async def create_checkout_subscription(
         "pending_checkout_subscription_id": sub["id"],
         "pending_checkout_amount_paise": amount_paise,
         "pending_checkout_kind": "first_cycle_intro" if intro else "monthly_mandate",
-        "pending_checkout_preserve_cycle": False,
+        "pending_checkout_preserve_cycle": test_mins >= 5,
         "pending_checkout_next_cycle": intro_next_iso,
         "razorpay_plan_id": plan_id,
         "pending_razorpay_plan_tables": int(tables),
@@ -431,7 +439,9 @@ async def create_checkout_subscription(
         if price.get("billing_override")
         else f"ZenTaap {tables} tables — monthly autopay mandate"
     )
-    if intro:
+    if intro and test_mins >= 5:
+        desc = f"Pay ₹{amount_paise/100:.0f} now · first AutoPay in ~{test_mins} minutes"
+    elif intro:
         desc = (
             f"Pay ₹{amount_paise/100:.0f} now · first AutoPay in 1 month + {TRIAL_DAYS} extra days"
         )
