@@ -136,7 +136,7 @@ export default function Login() {
               pattern="[0-9]*"
               value={pin}
               onChange={onPinChange}
-              placeholder="Your staff PIN"
+              placeholder="Pin"
               maxLength={10}
               autoComplete="off"
               autoCorrect="off"
