@@ -116,7 +116,7 @@ function CartDrawer({ cart, setCart, tableLocked, onClose, onPlaceOrder, placing
   );
 }
 
-function OrderSuccessOverlay({ tableNum, orderNumber, onDone }) {
+function OrderSuccessOverlay({ tableNum, orderNumber, added, onDone }) {
   // Auto-dismiss after a short celebration
   useEffect(() => {
     const t = setTimeout(onDone, 3200);
@@ -137,7 +137,7 @@ function OrderSuccessOverlay({ tableNum, orderNumber, onDone }) {
           </svg>
         </div>
         <div className="font-serif" style={{ fontSize: 26, marginBottom: 6, color: "var(--gold)" }}>
-          Order Placed!
+          {added ? "Added to your bill" : "Order Placed!"}
         </div>
         <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 4 }}>
           {tableNum ? `Sit tight at Table ${tableNum} — kitchen is on it.` : "Sit tight — kitchen is on it."}
@@ -158,10 +158,12 @@ export default function Customer() {
   const [cart, setCart] = useState([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [placing, setPlacing] = useState(false);
-  const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber }
+  const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber, sessionCode, added }
   const [restaurantName, setRestaurantName] = useState("");
   const [notFound, setNotFound] = useState(false);
   const [orderNotes, setOrderNotes] = useState("");
+  const [sitting, setSitting] = useState(null);
+  const [billOpen, setBillOpen] = useState(false);
 
   // Lock the table number from URL (?table=N). When missing/invalid -> null (walk-in).
   const tableFromUrl = useMemo(() => {
@@ -173,6 +175,19 @@ export default function Customer() {
       return null;
     }
   }, []);
+
+  const loadSitting = async () => {
+    if (!slug || !tableFromUrl) {
+      setSitting(null);
+      return;
+    }
+    try {
+      const { data } = await api.get(`/r/${slug}/tables/${tableFromUrl}/session`);
+      setSitting(data?.session || null);
+    } catch {
+      /* menu still works if sitting lookup fails */
+    }
+  };
 
   const refresh = async () => {
     if (!slug) return;
@@ -190,6 +205,7 @@ export default function Customer() {
       if (err?.response?.status === 404) setNotFound(true);
       console.warn("Customer.refresh failed:", err?.response?.status, err?.message);
     }
+    await loadSitting();
   };
 
   useEffect(() => { refresh(); }, [slug]);
@@ -229,10 +245,16 @@ export default function Customer() {
         items,
         notes: orderNotes.trim() || undefined,
       });
-      setSuccessInfo({ tableNum: tableN || null, orderNumber: data?.order_number || null });
+      setSuccessInfo({
+        tableNum: tableN || null,
+        orderNumber: data?.order_number || null,
+        sessionCode: data?.session_code || sitting?.session_code || null,
+        added: Boolean(sitting),
+      });
       setCart([]);
       setOrderNotes("");
       setDrawerOpen(false);
+      await loadSitting();
     } catch (err) {
       toast.error(friendlyError(err, "Couldn't place your order. Please try again."));
     } finally {
@@ -279,6 +301,39 @@ export default function Customer() {
           </div>
         </div>
       </div>
+
+      {sitting && sitting.status !== "closed" && (
+        <div className="customer-session-bill" data-testid="customer-session-bill">
+          <button
+            type="button"
+            className="customer-session-bill-toggle"
+            onClick={() => setBillOpen((v) => !v)}
+            data-testid="customer-session-toggle"
+          >
+            <div>
+              <div className="customer-session-bill-title">
+                Table {sitting.table} — Current Bill
+              </div>
+              <div className="customer-session-bill-sub">{sitting.session_code}</div>
+            </div>
+            <div className="customer-session-bill-total">₹{sitting.current_total}</div>
+          </button>
+          {billOpen && (
+            <div className="customer-session-bill-body" data-testid="customer-session-lines">
+              {(sitting.lines || []).map((it, i) => (
+                <div key={`${it.name}-${i}`} className="customer-session-line">
+                  <span>{it.name} × {it.qty}</span>
+                  <span>₹{it.amount ?? (it.qty * it.price)}</span>
+                </div>
+              ))}
+              <div className="customer-session-line is-total">
+                <span>Total</span>
+                <span>₹{sitting.current_total}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="filter-tabs" style={{ flexWrap: "wrap", marginBottom: 22 }}>
         <button
@@ -395,6 +450,7 @@ export default function Customer() {
         <OrderSuccessOverlay
           tableNum={successInfo.tableNum}
           orderNumber={successInfo.orderNumber}
+          added={successInfo.added}
           onDone={() => setSuccessInfo(null)}
         />
       )}

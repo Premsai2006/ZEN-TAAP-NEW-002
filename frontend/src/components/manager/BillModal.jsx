@@ -5,25 +5,43 @@ import { api } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import CustomSelect from "@/components/ui/CustomSelect";
 
-export default function BillModal({ order, settings, onClose, onSettled }) {
+export default function BillModal({ order, session, settings, onClose, onSettled }) {
   const [waPhone, setWaPhone] = useState("");
   const [showWa, setShowWa] = useState(false);
   const [payMode, setPayMode] = useState("cash");
   const [settling, setSettling] = useState(false);
   const printRef = useRef(null);
-  if (!order) return null;
+  const sitting = session || null;
+  if (!sitting && !order) return null;
   const s = settings || {};
-  const items = Array.isArray(order.items) ? order.items : [];
-  const subtotal = Number(order.amount ?? items.reduce((sum, it) => sum + (it.qty || 0) * (it.price || 0), 0)) || 0;
+  const items = sitting
+    ? (Array.isArray(sitting.lines) && sitting.lines.length
+        ? sitting.lines
+        : (sitting.orders || []).flatMap((o) =>
+            o.status === "cancelled" ? [] : (o.items || [])
+          ))
+    : (Array.isArray(order.items) ? order.items : []);
+  const subtotal = Number(
+    sitting?.current_total ??
+      order?.amount ??
+      items.reduce((sum, it) => sum + (it.qty || 0) * (it.price || 0), 0)
+  ) || 0;
   const gstRate = (s.gst_rate ?? 0) / 100;
   const cgst = +(subtotal * gstRate / 2).toFixed(2);
   const sgst = +(subtotal * gstRate / 2).toFixed(2);
   const total = +(subtotal + cgst + sgst).toFixed(2);
-  const billNo = `B-${order.order_number ?? "?"}`;
-  const tableText = order.table === 0 || order.table == null ? "Walk-in" : `Table ${order.table}`;
-  const dateStr = order.created_at
-    ? new Date(order.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+  const billNo = sitting?.session_code
+    ? `B-${sitting.session_code}`
+    : `B-${order?.order_number ?? "?"}`;
+  const tableNum = sitting?.table ?? order?.table;
+  const tableText = tableNum === 0 || tableNum == null ? "Walk-in" : `Table ${tableNum}`;
+  const dateStr = (sitting?.opened_at || order?.created_at)
+    ? new Date(sitting?.opened_at || order.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
     : "—";
+  const closed = sitting
+    ? sitting.status === "closed"
+    : ["paid", "cancelled"].includes(order?.status);
+  const settleSessionId = sitting?.id || order?.session_id;
 
   const handlePrint = () => {
     const el = printRef.current;
@@ -300,7 +318,7 @@ export default function BillModal({ order, settings, onClose, onSettled }) {
         </div>
 
         <div className="no-print" style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-          {order.status !== "paid" && order.status !== "cancelled" && (
+          {!closed && (
             <div style={{ width: "100%", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <CustomSelect
                 value={payMode}
@@ -322,13 +340,19 @@ export default function BillModal({ order, settings, onClose, onSettled }) {
                 onClick={async () => {
                   setSettling(true);
                   try {
-                    await api.post(`/orders/${order.id}/settle`, {
-                      payment_mode: payMode,
-                      clear_table: true,
-                    });
+                    if (settleSessionId) {
+                      await api.post(`/table-sessions/${settleSessionId}/settle`, {
+                        payment_mode: payMode,
+                      });
+                    } else if (order?.id) {
+                      await api.post(`/orders/${order.id}/settle`, {
+                        payment_mode: payMode,
+                        clear_table: true,
+                      });
+                    }
                     toast.success(
-                      order.table > 0
-                        ? `Marked paid (${payMode}) · Table ${order.table} cleared`
+                      tableNum > 0
+                        ? `Marked paid (${payMode}) · Table ${tableNum} closed`
                         : `Marked paid (${payMode})`
                     );
                     onSettled?.();
@@ -341,7 +365,7 @@ export default function BillModal({ order, settings, onClose, onSettled }) {
                 }}
                 style={{ flex: "2 1 160px", background: "var(--green, #22c55e)", color: "#fff" }}
               >
-                {settling ? "Saving…" : "Mark Paid & Clear Table"}
+                {settling ? "Saving…" : tableNum > 0 ? "Mark Paid & Close Table" : "Mark Paid"}
               </button>
             </div>
           )}

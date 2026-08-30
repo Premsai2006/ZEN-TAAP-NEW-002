@@ -7,7 +7,7 @@ from app.config import DEMO_MODE, CORS_ORIGINS
 from app.database import client, db
 from app.routers import (
     auth, profile, categories, menu, orders, settings, subscription, payments, stats, upload,
-    public_restaurant, admin,
+    public_restaurant, admin, table_sessions,
 )
 from app.services import restaurants as rest_svc
 from app.services import pricing as pricing_svc
@@ -23,6 +23,7 @@ api_router.include_router(profile.router)
 api_router.include_router(categories.router)
 api_router.include_router(menu.router)
 api_router.include_router(orders.router)
+api_router.include_router(table_sessions.router)
 api_router.include_router(settings.router)
 api_router.include_router(subscription.router)
 api_router.include_router(payments.router)

@@ -78,6 +78,7 @@ export default function OrdersSection({
   const noStatus = statusLocked ?? locked;
   const [filter, setFilter] = useState("all");
   const [billOrder, setBillOrder] = useState(null);
+  const [billSession, setBillSession] = useState(null);
   const [walkInOpen, setWalkInOpen] = useState(false);
   const [wiTable, setWiTable] = useState(0);
   const [wiCart, setWiCart] = useState({}); // id -> { item, qty }
@@ -102,6 +103,26 @@ export default function OrdersSection({
         toast.error(friendlyError(err, "Couldn't update that order. Please try again."));
       }
     }
+  };
+
+  const openBill = async (o) => {
+    if (noStatus) {
+      toast.error("Subscribe to ZenTaap to generate bills.");
+      return;
+    }
+    if (o.status === "cancelled") return;
+    try {
+      if (o.session_id) {
+        const { data } = await api.get(`/table-sessions/${o.session_id}`);
+        setBillSession(data);
+        setBillOrder(null);
+        return;
+      }
+    } catch {
+      /* fall through to single-order bill */
+    }
+    setBillSession(null);
+    setBillOrder(o);
   };
 
   const placeWalkIn = async () => {
@@ -259,7 +280,9 @@ export default function OrdersSection({
                 return (
                   <tr key={o.id} data-testid={`order-row-${o.order_number}`}>
                     <td style={{ fontWeight: 500, color: "var(--gold)" }}>#{o.order_number}</td>
-                    <td>{tableLabel(o.table)}</td>
+                    <td>{tableLabel(o.table)}{o.session_code ? (
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{o.session_code}</div>
+                    ) : null}</td>
                     <td style={{ fontSize: 13, color: "var(--muted)", maxWidth: 220 }}>{itemsLabel}</td>
                     <td style={{ fontWeight: 500 }}>
                       {showRevenue ? `₹${o.amount ?? 0}` : `₹${maskRevenue(o.amount ?? 0)}`}
@@ -301,13 +324,7 @@ export default function OrdersSection({
                         )}
                         <button
                           className="mini-btn primary"
-                          onClick={() => {
-                            if (noStatus) {
-                              toast.error("Subscribe to ZenTaap to generate bills.");
-                              return;
-                            }
-                            setBillOrder(o);
-                          }}
+                          onClick={() => openBill(o)}
                           data-testid={`generate-bill-${o.order_number}`}
                           title={noStatus ? "Requires subscription" : "Generate Bill"}
                           disabled={noStatus || o.status === "cancelled"}
@@ -326,11 +343,15 @@ export default function OrdersSection({
         <PageBar page={page} total={filtered.length} pageSize={PAGE_SIZE} onPage={setPage} testId="orders-page-bar" />
       </div>
 
-      {billOrder && (
+      {(billSession || billOrder) && (
         <BillModal
+          session={billSession}
           order={billOrder}
           settings={settings}
-          onClose={() => setBillOrder(null)}
+          onClose={() => {
+            setBillOrder(null);
+            setBillSession(null);
+          }}
           onSettled={onRefresh}
         />
       )}

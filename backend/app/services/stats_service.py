@@ -126,10 +126,19 @@ async def build_stats_payload(orders: list, today: date, restaurant_id: str = No
     revenue = sum(o["amount"] for o in orders)
     completed = sum(1 for o in orders if o["status"] in ("done", "delivered"))
     pending = sum(1 for o in orders if o["status"] == "new")
-    active_tables = len({
+    open_sittings = await db.table_sessions.count_documents(
+        {
+            **({"restaurant_id": restaurant_id} if restaurant_id else {}),
+            "status": {"$in": ["open", "payment_pending"]},
+            "table": {"$gt": 0},
+        }
+    ) if restaurant_id else 0
+    # Fallback for stats windows that predate sittings, or if none are open yet today.
+    legacy_active = len({
         o["table"] for o in orders
-        if o["status"] in ("new", "cooking") and o.get("table")
+        if o["status"] in ("new", "cooking", "done", "delivered") and o.get("table")
     })
+    active_tables = open_sittings or legacy_active
     avg_order_value = round(revenue / total_orders, 2) if total_orders else 0
 
     cat_map, img_map, emoji_map, cost_map = await menu_meta_for(orders, restaurant_id)

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
-import { Download, Link2, Lock, QrCode, Search } from "lucide-react";
+import { Download, Link2, Lock, QrCode, Search, Receipt } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
+import { friendlyError } from "@/lib/errors";
 import { restaurantOrderUrl } from "@/lib/qr";
 import {
   buildLabeledQrPng,
@@ -11,8 +13,34 @@ import {
   triggerBlobDownload,
 } from "@/lib/qrDownload";
 import PageBar, { PAGE_SIZE, paginate } from "@/components/ui/PageBar";
+import BillModal from "@/components/manager/BillModal";
 
-const OPEN_ORDER = new Set(["new", "cooking", "done"]);
+const LEGACY_OPEN = new Set(["new", "cooking", "done", "delivered"]);
+
+function statusLabel(s) {
+  if (s === "payment_pending") return "Payment pending";
+  if (s === "available") return "Available";
+  if (s === "closed") return "Closed";
+  if (s === "open") return "Open";
+  return s || "Available";
+}
+
+function rupee(n) {
+  return `₹${Number(n || 0).toLocaleString("en-IN")}`;
+}
+
+function formatWhen(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-IN", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+}
 
 function TableQrCard({
   n,
@@ -71,6 +99,8 @@ export default function TablesSection({
   restaurantName,
   locked = false,
   onOpenSubscribe,
+  settings,
+  onRefresh,
 }) {
   const navigate = useNavigate();
   const slug = (slugProp || localStorage.getItem("mgr_slug") || "").trim().toLowerCase();
@@ -86,12 +116,16 @@ export default function TablesSection({
   const amountByTable = useMemo(() => {
     const map = {};
     for (const o of orders || []) {
-      if (OPEN_ORDER.has(o.status) && o.table > 0) {
+      if (LEGACY_OPEN.has(o.status) && o.table > 0) {
         map[o.table] = (map[o.table] || 0) + o.amount;
       }
     }
     return map;
   }, [orders]);
+
+  const [floor, setFloor] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [billSession, setBillSession] = useState(null);
 
   const [tab, setTab] = useState("floor");
   const [zipping, setZipping] = useState(false);
@@ -106,12 +140,22 @@ export default function TablesSection({
     [tableCount]
   );
 
-  const occupiedNums = useMemo(
-    () => tableNums.filter((n) => amountByTable[n]),
-    [tableNums, amountByTable]
-  );
-  const occupiedCount = occupiedNums.length;
-  const emptyCount = tableCount - occupiedCount;
+  const rowByTable = useMemo(() => {
+    const map = {};
+    for (const row of floor?.tables || []) {
+      map[row.table] = row;
+    }
+    return map;
+  }, [floor]);
+
+  const occupiedNums = useMemo(() => {
+    if (floor?.tables) {
+      return tableNums.filter((n) => rowByTable[n] && rowByTable[n].status !== "available");
+    }
+    return tableNums.filter((n) => amountByTable[n]);
+  }, [tableNums, floor, rowByTable, amountByTable]);
+  const occupiedCount = floor?.occupied ?? occupiedNums.length;
+  const emptyCount = floor?.available ?? tableCount - occupiedCount;
 
   const lookupParsed = lookupInput === "" ? NaN : parseInt(lookupInput, 10);
   const lookupValid =
@@ -129,7 +173,47 @@ export default function TablesSection({
     setPage(1);
   }, [showAllQrs]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get("/table-sessions/floor");
+        if (!cancelled) setFloor(data);
+      } catch {
+        /* keep legacy occupancy from orders */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [orders]);
+
+  const openTable = async (n) => {
+    setFloorPick(n);
+    const row = rowByTable[n];
+    if (!row || row.status === "available" || !row.session_id) {
+      setDetail(null);
+      return;
+    }
+    try {
+      const { data } = await api.get(`/table-sessions/${row.session_id}`);
+      setDetail(data);
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't load this table session."));
+    }
+  };
+
+  const requestBill = async (sessionId) => {
+    try {
+      const { data } = await api.post(`/table-sessions/${sessionId}/request-bill`);
+      setDetail(data);
+      toast.success("Bill requested — table is payment pending.");
+      onRefresh?.();
+    } catch (err) {
+      toast.error(friendlyError(err, "Couldn't request the bill."));
+    }
+  };
+
   const openQrForTable = (n) => {
+    setDetail(null);
     setTab("qr");
     setShowAllQrs(false);
     setLookupInput(String(n));
@@ -287,14 +371,16 @@ export default function TablesSection({
 
           <div className="tables-floor" data-testid="tables-floor">
             {tableNums.map((n) => {
-              const occupied = Boolean(amountByTable[n]);
+              const row = rowByTable[n];
+              const occupied = row ? row.status !== "available" : Boolean(amountByTable[n]);
+              const pending = row?.status === "payment_pending";
               return (
                 <button
                   key={n}
                   type="button"
-                  className={`tables-floor-num${occupied ? " occupied" : ""}${floorPick === n ? " is-focus" : ""}`}
-                  onClick={() => setFloorPick(n)}
-                  title={occupied ? `Table ${n} · occupied` : `Table ${n} · empty`}
+                  className={`tables-floor-num${occupied ? " occupied" : ""}${pending ? " pending" : ""}${floorPick === n ? " is-focus" : ""}`}
+                  onClick={() => openTable(n)}
+                  title={occupied ? `Table ${n} · ${statusLabel(row?.status || "open")}` : `Table ${n} · available`}
                   data-testid={`floor-table-${n}`}
                 >
                   {n}
@@ -303,34 +389,44 @@ export default function TablesSection({
             })}
           </div>
 
-          <div className="tables-block-title">Occupied now</div>
-          {occupiedNums.length === 0 ? (
-            <div className="tables-qr-empty" data-testid="tables-occupied-empty">
-              All tables are empty.
-            </div>
-          ) : (
-            <div className="tables-occ-grid" data-testid="tables-occupied-list">
-              {occupiedNums.map((n) => (
-                <div
-                  key={n}
-                  className={`tables-occ-card${floorPick === n ? " is-focus" : ""}`}
-                  data-testid={`occupied-table-${n}`}
-                >
-                  <div className="tables-occ-num">{n}</div>
-                  <div className="tables-occ-meta">Occupied · ₹{amountByTable[n]}</div>
-                  <button
-                    type="button"
-                    className="mini-btn"
-                    onClick={() => openQrForTable(n)}
-                    data-testid={`occupied-view-qr-${n}`}
-                  >
-                    <QrCode size={12} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
-                    View QR
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="table-scroll tables-session-list" data-testid="tables-session-list">
+            <table className="tables-session-table">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Session</th>
+                  <th>Status</th>
+                  <th>Current Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableNums.map((n) => {
+                  const row = rowByTable[n];
+                  const status = row?.status || (amountByTable[n] ? "open" : "available");
+                  const code = row?.session_code || "—";
+                  const total = row?.current_total ?? amountByTable[n] ?? 0;
+                  return (
+                    <tr
+                      key={n}
+                      className={floorPick === n ? "is-focus" : ""}
+                      onClick={() => openTable(n)}
+                      data-testid={`floor-row-${n}`}
+                      style={{ cursor: status === "available" ? "default" : "pointer" }}
+                    >
+                      <td style={{ fontWeight: 600 }}>T{n}</td>
+                      <td style={{ color: "var(--muted)", fontSize: 13 }}>{status === "available" ? "—" : code}</td>
+                      <td>
+                        <span className={`badge ${status === "available" ? "badge-na" : status === "payment_pending" ? "badge-cooking" : "badge-new"}`}>
+                          {statusLabel(status)}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 500 }}>{rupee(total)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
 
@@ -454,6 +550,127 @@ export default function TablesSection({
             )}
           </div>
         </>
+      )}
+
+      {detail && (
+        <div
+          className="bill-modal-overlay"
+          data-testid="table-session-detail"
+          onClick={() => setDetail(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            zIndex: 50,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--line)",
+              borderRadius: 14,
+              padding: 18,
+              maxWidth: 520,
+              width: "100%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+              <div className="font-serif" style={{ fontSize: 20, color: "var(--gold)" }}>
+                Table {detail.table} — Current Bill
+              </div>
+              <span className={`badge ${detail.status === "payment_pending" ? "badge-cooking" : "badge-new"}`}>
+                {statusLabel(detail.status)}
+              </span>
+            </div>
+            <div style={{ color: "var(--muted)", fontSize: 13, margin: "6px 0 14px" }}>
+              Session {detail.session_code}
+            </div>
+
+            <div className="tables-block-title">Orders</div>
+            {(detail.orders || []).filter((o) => o.status !== "cancelled").length === 0 ? (
+              <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12 }}>No orders yet.</div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                {(detail.orders || []).filter((o) => o.status !== "cancelled").map((o) => (
+                  <div
+                    key={o.id}
+                    data-testid={`session-order-${o.order_number}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: "8px 0",
+                      borderBottom: "1px solid var(--line)",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>Order #{o.order_number}</div>
+                      <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                        {formatWhen(o.created_at)} · {(o.items || []).map((it) => `${it.name} ×${it.qty}`).join(", ")}
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{rupee(o.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginBottom: 16 }}>
+              <span>Current Bill</span>
+              <span data-testid="session-current-total">{rupee(detail.current_total)}</span>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {detail.status === "open" && (
+                <button
+                  type="button"
+                  className="mini-btn"
+                  data-testid="session-request-bill"
+                  onClick={() => requestBill(detail.id)}
+                >
+                  Request bill
+                </button>
+              )}
+              <button
+                type="button"
+                className="mini-btn primary"
+                data-testid="session-open-bill"
+                onClick={() => setBillSession(detail)}
+              >
+                <Receipt size={12} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                Bill / Close table
+              </button>
+              <button type="button" className="mini-btn" onClick={() => openQrForTable(detail.table)}>
+                <QrCode size={12} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                View QR
+              </button>
+              <button type="button" className="submit-btn ghost" onClick={() => setDetail(null)} style={{ marginLeft: "auto" }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {billSession && (
+        <BillModal
+          session={billSession}
+          settings={settings}
+          onClose={() => setBillSession(null)}
+          onSettled={() => {
+            setBillSession(null);
+            setDetail(null);
+            onRefresh?.();
+          }}
+        />
       )}
     </div>
   );

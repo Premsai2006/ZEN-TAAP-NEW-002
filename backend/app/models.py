@@ -132,7 +132,21 @@ class Order(BaseModel):
     payment_mode: Optional[str] = None
     paid_at: Optional[str] = None
     cancelled_at: Optional[str] = None
+    session_id: Optional[str] = None
+    session_code: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class TableSession(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    restaurant_id: Optional[str] = None
+    table: int
+    session_code: str
+    status: str = "open"  # open | payment_pending | closed
+    opened_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    closed_at: Optional[str] = None
+    paid_at: Optional[str] = None
+    payment_mode: Optional[str] = None
 
 
 class OrderCreate(BaseModel):

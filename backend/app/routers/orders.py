@@ -1,12 +1,13 @@
-from typing import List, Optional
+from typing import List
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from app.database import db
 from app.deps import require_manager, require_subscription, require_manager_or_kitchen, assert_role, has_active_subscription
-from app.models import Order, OrderCreate, OrderUpdate, OrderItem
+from app.models import Order, OrderCreate, OrderUpdate
 from app.services.order_pricing import reprice_items, enforce_table_limit
 from app.services import restaurants as rest_svc
+from app.services import table_sessions as sess_svc
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -34,23 +35,8 @@ async def create_order(body: OrderCreate, sess=Depends(require_subscription)):
     doc = await rest_svc.require_restaurant_id(rid)
     enforce_table_limit(body.table, doc.get("subscription_tables"))
     priced_items, amount = await reprice_items(rid, body.items)
-    last = await db.orders.find(
-        {"restaurant_id": rid}, {"_id": 0}
-    ).sort("order_number", -1).limit(1).to_list(1)
-    next_num = (last[0]["order_number"] + 1) if last else 1001
-    items = [OrderItem(**i) for i in priced_items]
-    notes = (getattr(body, "notes", None) or "")[:500]
-    order = Order(
-        restaurant_id=rid,
-        order_number=next_num,
-        table=body.table,
-        items=items,
-        amount=amount,
-        notes=notes or None,
-    )
-    payload = order.model_dump()
-    await db.orders.insert_one(payload)
-    return order
+    notes = (getattr(body, "notes", None) or "")[:500] or None
+    return await sess_svc.create_attached_order(rid, body.table, priced_items, amount, notes)
 
 
 @router.put("/{order_id}", response_model=Order)
@@ -82,6 +68,8 @@ async def update_order(order_id: str, body: OrderUpdate, sess=Depends(require_ma
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="That order was not found.")
+    if body.status in ("cancelled", "paid"):
+        await sess_svc.maybe_close_empty_session(rid, existing.get("session_id"))
     return await db.orders.find_one({"id": order_id, "restaurant_id": rid}, {"_id": 0})
 
 
@@ -103,21 +91,32 @@ async def settle_order(order_id: str, body: SettleBody, sess=Depends(require_man
             status_code=402,
             detail="Subscribe to ZenTaap to use this feature. You can browse the dashboard freely.",
         )
+    session_id = order.get("session_id")
+    table = int(order.get("table") or 0)
+    if body.clear_table:
+        if table > 0 and not session_id:
+            session = await sess_svc.attach_or_open_session(rid, table)
+            session_id = session["id"]
+            await db.orders.update_one(
+                {"id": order_id, "restaurant_id": rid},
+                {"$set": {"session_id": session_id, "session_code": session.get("session_code")}},
+            )
+        if session_id:
+            closed = await sess_svc.settle_session(rid, session_id, mode)
+            updated = await db.orders.find_one({"id": order_id, "restaurant_id": rid}, {"_id": 0})
+            paid_n = sum(1 for o in closed.get("orders") or [] if o.get("status") == "paid")
+            return {
+                "success": True,
+                "order": updated,
+                "session": closed,
+                "table_orders_cleared": max(paid_n - 1, 0),
+            }
+
     now = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one(
         {"id": order_id, "restaurant_id": rid},
         {"$set": {"status": "paid", "paid_at": now, "payment_mode": mode}},
     )
-    cleared = 0
-    if body.clear_table and order.get("table", 0) > 0:
-        r = await db.orders.update_many(
-            {
-                "restaurant_id": rid,
-                "table": order["table"],
-                "status": {"$in": ["new", "cooking", "done", "delivered"]},
-            },
-            {"$set": {"status": "paid", "paid_at": now, "payment_mode": mode}},
-        )
-        cleared = r.modified_count
+    await sess_svc.maybe_close_empty_session(rid, session_id)
     updated = await db.orders.find_one({"id": order_id, "restaurant_id": rid}, {"_id": 0})
-    return {"success": True, "order": updated, "table_orders_cleared": cleared}
+    return {"success": True, "order": updated, "table_orders_cleared": 0}

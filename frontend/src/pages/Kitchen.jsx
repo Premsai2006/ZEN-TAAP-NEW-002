@@ -330,7 +330,10 @@ export default function Kitchen() {
               <div className="ticket-head">
                 <div>
                   <div className="ticket-num">#{o.order_number}</div>
-                  <div className="ticket-table">{o.table === 0 || o.table == null ? "Walk-in" : `Table ${o.table}`}</div>
+                  <div className="ticket-table">
+                    {o.table === 0 || o.table == null ? "Walk-in" : `Table ${o.table}`}
+                    {o.session_code ? <span className="ticket-session">{o.session_code}</span> : null}
+                  </div>
                 </div>
                 <div className="ticket-time">
                   <Clock size={11} style={{ display: "inline", marginRight: 3, verticalAlign: "middle" }} />

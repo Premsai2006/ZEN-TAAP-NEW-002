@@ -336,6 +336,8 @@ export default function Manager() {
             restaurantName={settings?.restaurant_name}
             locked={locked}
             onOpenSubscribe={() => setActive("subscribe")}
+            settings={settings}
+            onRefresh={refresh}
           />
         )}
         {active === "menu" && (

@@ -110,6 +110,19 @@ async def ensure_indexes():
         await db.menu_items.create_index([("restaurant_id", 1), ("id", 1)])
         await db.categories.create_index([("restaurant_id", 1), ("id", 1)])
         await db.orders.create_index([("restaurant_id", 1), ("order_number", -1)])
+        await db.orders.create_index([("restaurant_id", 1), ("session_id", 1)])
+        await db.orders.create_index([("restaurant_id", 1), ("table", 1), ("status", 1)])
+        await db.table_sessions.create_index("id", unique=True)
+        await db.table_sessions.create_index([("restaurant_id", 1), ("session_code", 1)], unique=True)
+        await db.table_sessions.create_index(
+            [("restaurant_id", 1), ("table", 1)],
+            unique=True,
+            name="one_open_session_per_table",
+            partialFilterExpression={
+                "status": {"$in": ["open", "payment_pending"]},
+                "table": {"$gt": 0},
+            },
+        )
         await db.sessions.create_index([("restaurant_id", 1), ("scope", 1), ("device_id", 1)])
         await db.staff.create_index([("restaurant_id", 1), ("id", 1)])
         await db.admin_audit.create_index("created_at")

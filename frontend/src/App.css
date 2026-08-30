@@ -219,9 +219,97 @@
   border-color: var(--gold);
   color: var(--gold);
 }
-.tables-floor-num.is-focus {
-  box-shadow: 0 0 0 2px var(--gold);
-  color: var(--text);
+.tables-floor-num.pending {
+  background: rgba(110,164,255,0.16);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.tables-session-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tables-session-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tables-session-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tables-session-table tbody tr:hover td {
+  background: var(--card-2);
+}
+.tables-session-table tbody tr.is-focus td {
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.customer-session-bill {
+  background: var(--card);
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  margin: 0 0 18px;
+  overflow: hidden;
+}
+.customer-session-bill-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.customer-session-bill-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.customer-session-bill-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.customer-session-bill-total {
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.customer-session-bill-body {
+  padding: 0 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.customer-session-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.customer-session-line.is-total {
+  border-bottom: none;
+  font-weight: 700;
+  padding-top: 10px;
+}
+
+.ticket-session {
+  display: block;
+  font-size: 11px;
+  color: var(--gold);
+  margin-top: 2px;
+  font-weight: 600;
 }
 .tables-block-title {
   font-size: 13px;
@@ -785,6 +873,13 @@ body {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+.tables-session-list {
+  max-height: 420px;
+  overflow: auto;
+}
+.table-scroll .tables-session-table {
+  min-width: 480px;
 }
 .table-scroll table {
   min-width: 640px;

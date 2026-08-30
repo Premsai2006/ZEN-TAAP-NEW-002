@@ -2,9 +2,10 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from app.database import db
 from app.deps import has_active_subscription
-from app.models import Order, OrderCreate, MenuItem, Category, OrderItem
+from app.models import Order, OrderCreate, MenuItem, Category
 from app.services import restaurants as rest_svc
 from app.services.order_pricing import reprice_items, enforce_table_limit
+from app.services import table_sessions as sess_svc
 
 router = APIRouter(prefix="/r", tags=["public-restaurant"])
 
@@ -50,20 +51,14 @@ async def public_create_order(slug: str, body: OrderCreate):
         )
     enforce_table_limit(body.table, doc.get("subscription_tables"))
     priced_items, amount = await reprice_items(doc["id"], body.items)
-    last = await db.orders.find(
-        {"restaurant_id": doc["id"]}, {"_id": 0}
-    ).sort("order_number", -1).limit(1).to_list(1)
-    next_num = (last[0]["order_number"] + 1) if last else 1001
-    items = [OrderItem(**i) for i in priced_items]
     notes = (body.notes or "")[:500] or None
-    order = Order(
-        restaurant_id=doc["id"],
-        order_number=next_num,
-        table=body.table,
-        items=items,
-        amount=amount,
-        notes=notes,
-    )
-    payload = order.model_dump()
-    await db.orders.insert_one(payload)
-    return order
+    return await sess_svc.create_attached_order(doc["id"], body.table, priced_items, amount, notes)
+
+
+@router.get("/{slug}/tables/{table}/session")
+async def public_table_session(slug: str, table: int):
+    doc = await rest_svc.require_by_slug(slug)
+    if table < 1:
+        return {"session": None}
+    enforce_table_limit(table, doc.get("subscription_tables"))
+    return await sess_svc.public_table_session(doc["id"], table)
