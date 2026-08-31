@@ -15,6 +15,7 @@ from app.services.subscription_access import (
     intro_trial_eligible,
     first_paid_cycle_end,
     BILLING_CYCLE_DAYS,
+    GRACE_DAYS,
 )
 
 router = APIRouter(tags=["subscription"])
@@ -87,6 +88,22 @@ async def get_subscription(sess=Depends(require_manager)):
         else:
             cycle_end = next_cycle
 
+    # Grace window after paid cycle end (access stays until grace_ends_at)
+    in_grace = False
+    grace_ends_at = None
+    grace_days_left = None
+    days_until_renewal = None
+    next_dt = parse_dt(next_cycle)
+    if status == "active" and next_dt:
+        if now >= next_dt:
+            grace_end = next_dt + timedelta(days=GRACE_DAYS)
+            if now < grace_end:
+                in_grace = True
+                grace_ends_at = grace_end.isoformat()
+                grace_days_left = max(0, (grace_end.date() - now.date()).days)
+        else:
+            days_until_renewal = max(0, (next_dt.date() - now.date()).days)
+
     return {
         "tables": doc.get("subscription_tables"),
         "subtotal": doc.get("subscription_subtotal"),
@@ -105,6 +122,11 @@ async def get_subscription(sess=Depends(require_manager)):
         "next_cycle_start": next_cycle,
         "effective_from": effective_from,
         "cycle_end": cycle_end,
+        "in_grace": in_grace,
+        "grace_days": GRACE_DAYS,
+        "grace_ends_at": grace_ends_at,
+        "grace_days_left": grace_days_left,
+        "days_until_renewal": days_until_renewal,
         "autopay_enabled": bool(doc.get("autopay_enabled", False)),
         "autopay_ready": bool(doc.get("autopay_ready", False)),
         "autopay_supported": razorpay_configured(),
@@ -124,6 +146,7 @@ async def get_subscription(sess=Depends(require_manager)):
         ),
         "needs_payment": (
             status in ("expired", "none", "skipped")
+            or in_grace
             or doc.get("payment_status") in ("failed", "grace", "awaiting_payment")
         ),
     }

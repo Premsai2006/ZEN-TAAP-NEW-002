@@ -161,6 +161,8 @@ export default function Customer() {
   const [successInfo, setSuccessInfo] = useState(null); // { tableNum, orderNumber, sessionCode, added }
   const [restaurantName, setRestaurantName] = useState("");
   const [notFound, setNotFound] = useState(false);
+  const [orderingEnabled, setOrderingEnabled] = useState(true);
+  const [subscriptionStatus, setSubscriptionStatus] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [sitting, setSitting] = useState(null);
   const [billOpen, setBillOpen] = useState(false);
@@ -192,15 +194,26 @@ export default function Customer() {
   const refresh = async () => {
     if (!slug) return;
     try {
-      const [m, c, r] = await Promise.all([
+      const { data: rest } = await api.get(`/r/${slug}`);
+      const enabled = rest?.ordering_enabled !== false;
+      setRestaurantName(rest?.restaurant_name || "");
+      setOrderingEnabled(enabled);
+      setSubscriptionStatus(rest?.subscription_status || "");
+      setNotFound(false);
+      if (!enabled) {
+        setMenu([]);
+        setCategories([]);
+        setCart([]);
+        setSitting(null);
+        setDrawerOpen(false);
+        return;
+      }
+      const [m, c] = await Promise.all([
         api.get(`/r/${slug}/menu`),
         api.get(`/r/${slug}/categories`),
-        api.get(`/r/${slug}`),
       ]);
       setMenu(m.data);
       setCategories(c.data);
-      setRestaurantName(r.data?.restaurant_name || "");
-      setNotFound(false);
     } catch (err) {
       if (err?.response?.status === 404) setNotFound(true);
       console.warn("Customer.refresh failed:", err?.response?.status, err?.message);
@@ -217,6 +230,10 @@ export default function Customer() {
   const cartCount = cart.reduce((s, l) => s + l.qty, 0);
 
   const addToCart = (it) => {
+    if (!orderingEnabled) {
+      toast.error("This restaurant is not accepting orders right now.");
+      return;
+    }
     setCart((c) => {
       const existing = c.find((l) => l.id === it.id);
       if (existing) return c.map((l) => (l.id === it.id ? { ...l, qty: l.qty + 1 } : l));
@@ -237,6 +254,10 @@ export default function Customer() {
   };
 
   const placeOrder = async (tableN) => {
+    if (!orderingEnabled) {
+      toast.error("Subscription expired. This restaurant is not accepting orders.");
+      return;
+    }
     setPlacing(true);
     try {
       const items = cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price, menu_item_id: l.id }));
@@ -268,6 +289,29 @@ export default function Customer() {
         <div className="font-serif" style={{ fontSize: 22, marginBottom: 8 }}>Restaurant not found</div>
         <div style={{ color: "var(--muted)", fontSize: 14 }}>
           Check the QR code or ask staff for the correct ordering link.
+        </div>
+      </div>
+    );
+  }
+
+  if (!orderingEnabled) {
+    const expired = ["expired", "none", "skipped"].includes(String(subscriptionStatus || "").toLowerCase());
+    return (
+      <div className="main customer-inactive" data-testid="customer-ordering-disabled">
+        <div className="brand-logo-wrap" style={{ justifyContent: "center", marginBottom: 18 }}>
+          <img src="/logo.png" alt="ZenTaap" className="brand-logo" style={{ height: 36 }} />
+        </div>
+        {restaurantName && (
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, paddingInline: 8 }} data-testid="customer-restaurant-name">
+            {restaurantName}
+          </div>
+        )}
+        <div className="font-serif customer-inactive-title">
+          {expired ? "Subscription expired" : "Ordering unavailable"}
+        </div>
+        <div className="customer-inactive-copy">
+          This QR menu is inactive. The restaurant is not accepting orders right now.
+          Please ask staff for help.
         </div>
       </div>
     );

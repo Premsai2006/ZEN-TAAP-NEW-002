@@ -223,13 +223,17 @@ async def migrate_singleton_to_restaurants() -> Optional[str]:
     return rid
 
 
-def public_restaurant_view(doc: dict) -> dict:
+def public_restaurant_view(doc: dict, *, ordering_enabled: bool = True, subscription_status: str = "") -> dict:
+    status = (subscription_status or doc.get("subscription_status") or "none").lower()
     return {
         "id": doc.get("id"),
         "slug": doc.get("slug"),
         "restaurant_name": doc.get("restaurant_name") or "",
         "logo_url": doc.get("logo_url") or "",
         "theme": doc.get("theme") or "dark",
+        "ordering_enabled": bool(ordering_enabled) and not bool(doc.get("suspended")),
+        "subscription_status": status,
+        "suspended": bool(doc.get("suspended")),
     }
 
 

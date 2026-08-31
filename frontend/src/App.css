@@ -2416,6 +2416,60 @@ tr:last-child td { border-bottom: none; }
   align-items: center;
   gap: 6px;
 }
+.explore-banner-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Renew reminder dialog — safe on narrow phones */
+.renew-reminder-dialog {
+  width: min(100vw - 28px, 32rem) !important;
+  max-width: min(100vw - 28px, 32rem) !important;
+  max-height: min(85dvh, 640px);
+  overflow-y: auto;
+  margin: 0;
+  border-radius: 14px;
+  padding: 20px 18px;
+  box-sizing: border-box;
+}
+.renew-reminder-actions {
+  gap: 8px;
+}
+.renew-reminder-actions button {
+  min-height: 44px;
+  justify-content: center;
+}
+
+/* Customer QR inactive / subscription expired */
+.customer-inactive {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 48px 20px max(40px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  text-align: center;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.customer-inactive-title {
+  font-size: clamp(20px, 5.5vw, 24px);
+  margin-bottom: 10px;
+  color: var(--gold);
+  line-height: 1.25;
+}
+.customer-inactive-copy {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 34ch;
+}
 
 /* Kitchen ticket board */
 .kitchen-shell { min-height: 100vh; background: var(--bg); padding: 24px; }
@@ -2593,8 +2647,35 @@ tr:last-child td { border-bottom: none; }
   .explore-banner {
     flex-direction: column !important;
     align-items: stretch !important;
+    margin: 0 0 14px 0 !important;
+    padding: 12px 14px !important;
+    gap: 12px !important;
   }
-  .explore-banner-cta { width: 100%; justify-content: center; }
+  .explore-banner-text { min-width: 0 !important; font-size: 12.5px; }
+  .explore-banner-cta {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+    padding: 10px 16px;
+  }
+  .renew-reminder-dialog {
+    width: min(100vw - 24px, 32rem) !important;
+    max-width: min(100vw - 24px, 32rem) !important;
+    padding: 18px 16px !important;
+    top: 50% !important;
+  }
+  .renew-reminder-actions {
+    flex-direction: column-reverse !important;
+    align-items: stretch !important;
+  }
+  .renew-reminder-actions button {
+    width: 100% !important;
+    margin: 0 !important;
+  }
+  .customer-inactive {
+    padding-top: 32px;
+    padding-bottom: max(28px, env(safe-area-inset-bottom, 0px));
+  }
   .charts-row { grid-template-columns: 1fr !important; }
   .add-item-card { padding: 16px !important; }
   .form-row { grid-template-columns: 1fr !important; }

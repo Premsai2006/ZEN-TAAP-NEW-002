@@ -11,6 +11,16 @@ import SalesSection from "@/components/manager/SalesSection";
 import ProfileSection from "@/components/manager/ProfileSection";
 import SettingsSection from "@/components/manager/SettingsSection";
 import LogoutDialog from "@/components/manager/LogoutDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Subscribe = lazy(() => import("@/pages/Subscribe"));
 
@@ -25,6 +35,19 @@ const NAV = [
 ];
 
 const LIVE_TABS = new Set(["orders", "tables"]);
+const RENEW_ALERT_KEY = "zt_renew_alert_dismissed";
+
+function renewAlertStorageKey(sub) {
+  if (!sub) return RENEW_ALERT_KEY;
+  return `${RENEW_ALERT_KEY}:${sub.grace_ends_at || sub.next_cycle_start || sub.status || "x"}`;
+}
+
+function daysLeftLabel(n) {
+  if (n == null) return null;
+  if (n <= 0) return "today";
+  if (n === 1) return "1 day";
+  return `${n} days`;
+}
 
 export default function Manager() {
   const navigate = useNavigate();
@@ -47,6 +70,7 @@ export default function Manager() {
   });
   const [clock, setClock] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
+  const [renewAlertOpen, setRenewAlertOpen] = useState(false);
 
   const cashier = role === "cashier";
   const canSubscribe = role === "owner" || role === "manager";
@@ -172,6 +196,28 @@ export default function Manager() {
   };
 
   useEffect(() => {
+    if (!subscription || !canSubscribe) return;
+    if (active === "subscribe") {
+      setRenewAlertOpen(false);
+      return;
+    }
+    const showGrace = Boolean(subscription.in_grace);
+    const showSoon =
+      subscription.status === "active"
+      && !subscription.in_grace
+      && Number.isFinite(subscription.days_until_renewal)
+      && subscription.days_until_renewal <= 3;
+    const showFailed =
+      subscription.status === "active"
+      && ["failed", "halted"].includes(String(subscription.payment_status || "").toLowerCase());
+    if (!(showGrace || showSoon || showFailed)) return;
+    try {
+      if (sessionStorage.getItem(renewAlertStorageKey(subscription)) === "1") return;
+    } catch { /* ignore */ }
+    setRenewAlertOpen(true);
+  }, [subscription, canSubscribe, active]);
+
+  useEffect(() => {
     if (!tab || !allowed.includes(tab)) {
       navigate(`/manager/${allowed[0] || "orders"}`, { replace: true });
     }
@@ -181,8 +227,37 @@ export default function Manager() {
   const subStatus = subscription?.status;
   const locked = subscription && !["trial", "active"].includes(subStatus);
   const expired = subStatus === "expired";
+  const inGrace = Boolean(subscription?.in_grace);
   const createLocked = Boolean(locked);
   const statusLocked = Boolean(locked) && !expired;
+
+  const dismissRenewAlert = () => {
+    try {
+      sessionStorage.setItem(renewAlertStorageKey(subscription), "1");
+    } catch { /* ignore */ }
+    setRenewAlertOpen(false);
+  };
+
+  const openRenewFromAlert = () => {
+    dismissRenewAlert();
+    setActive("subscribe");
+  };
+
+  const renewDaysText = inGrace
+    ? daysLeftLabel(subscription?.grace_days_left)
+    : daysLeftLabel(subscription?.days_until_renewal);
+
+  const renewAlertTitle = inGrace
+    ? "Renewal needed"
+    : (["failed", "halted"].includes(String(subscription?.payment_status || "").toLowerCase())
+      ? "AutoPay failed"
+      : "Plan renewing soon");
+
+  const renewAlertBody = inGrace
+    ? `Your billing period ended. You still have full access for ${renewDaysText || "a short grace period"}. Pay now to keep QR ordering and manager features after that.`
+    : (["failed", "halted"].includes(String(subscription?.payment_status || "").toLowerCase())
+      ? "The automatic renewal did not go through. Pay now with a new checkout to keep your plan active."
+      : `Your plan renews in ${renewDaysText || "a few days"}. If AutoPay fails, pay from Subscription to avoid losing access.`);
 
   return (
     <div className={`layout ${mobileNav ? "mobile-nav-open" : ""}`} data-testid="manager-dashboard">
@@ -271,9 +346,33 @@ export default function Manager() {
           </div>
         </div>
 
+        {subscription && inGrace && active !== "subscribe" && (
+          <div className="explore-banner" data-testid="grace-renew-banner" style={{ borderColor: "rgba(232,125,47,0.45)" }}>
+            <div className="explore-banner-body">
+              <CreditCard size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
+              <div className="explore-banner-text">
+                <b>Plan ended — {renewDaysText || "grace"} left</b>
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
+                  Full access continues during grace. Renew now so QR ordering does not stop after that.
+                </div>
+              </div>
+            </div>
+            {canSubscribe && (
+              <button
+                type="button"
+                className="explore-banner-cta"
+                onClick={() => setActive("subscribe")}
+                data-testid="grace-renew-btn"
+              >
+                Pay &amp; renew <ArrowRight size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
         {subscription && !["trial", "active"].includes(subscription.status) && active !== "subscribe" && (
           <div className="explore-banner" data-testid="explore-mode-banner">
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: 1, minWidth: 220 }}>
+            <div className="explore-banner-body">
               <Lock size={18} color="var(--gold)" style={{ marginTop: 2, flexShrink: 0 }} />
               <div className="explore-banner-text">
                 {subscription.status === "expired" ? (
@@ -376,6 +475,52 @@ export default function Manager() {
         )}
         {active === "settings" && <SettingsSection settings={settings} onRefresh={refresh} role={role} />}
       </div>
+
+      <AlertDialog
+        open={renewAlertOpen && canSubscribe && active !== "subscribe"}
+        onOpenChange={(v) => {
+          if (!v) dismissRenewAlert();
+        }}
+      >
+        <AlertDialogContent
+          className="renew-reminder-dialog"
+          data-testid="renew-reminder-dialog"
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--line)",
+            color: "var(--text)",
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-serif" style={{ color: "var(--gold)", fontSize: "clamp(18px, 5vw, 22px)" }}>
+              {renewAlertTitle}
+            </AlertDialogTitle>
+            <AlertDialogDescription style={{ color: "var(--muted)", lineHeight: 1.55, fontSize: 14 }}>
+              {renewAlertBody}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="renew-reminder-actions">
+            <AlertDialogCancel
+              onClick={dismissRenewAlert}
+              data-testid="renew-reminder-later-btn"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--line)",
+                color: "var(--text)",
+              }}
+            >
+              Later
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={openRenewFromAlert}
+              data-testid="renew-reminder-pay-btn"
+              style={{ background: "var(--gold)", color: "#1a1208", border: "none" }}
+            >
+              Go to payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <LogoutDialog
         open={showLogout}
